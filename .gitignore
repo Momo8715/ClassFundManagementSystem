@@ -3,8 +3,6 @@ db_config.json
 
 # 部署配置（含宝塔 API 密钥）- 绝对不能提交
 .env.deploy
-deploy.sh
-deploy.bat
 
 # 上传的文件
 uploads/*
