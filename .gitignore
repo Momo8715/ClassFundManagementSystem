@@ -1,0 +1,27 @@
+# 数据库配置（含密码）- 绝对不能提交
+db_config.json
+
+# 上传的文件
+uploads/*
+!uploads/.htaccess
+
+# 备份目录
+backup_*/
+
+# 系统文件
+.user.ini
+.htaccess
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reasonix
+.reasonix/
