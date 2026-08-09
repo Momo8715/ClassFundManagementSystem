@@ -1,0 +1,91 @@
+name: 自动打包发布
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 打包并发布 Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 提取版本号
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: 更新 version.json
+        run: |
+          python3 - "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.tag }}" <<'EOF'
+          import json, sys
+          version, tag = sys.argv[1], sys.argv[2]
+          with open('version.json', 'r', encoding='utf-8') as f:
+              data = json.load(f)
+          data['version'] = version
+          data['notes'] = '自动发布 ' + tag
+          data['url'] = 'https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip'
+          with open('version.json', 'w', encoding='utf-8') as f:
+              json.dump(data, f, ensure_ascii=False)
+          EOF
+          cp version.json /tmp/version.json.new
+          echo "--- 更新后的 version.json ---"
+          cat version.json
+
+      - name: 打包 update.zip
+        run: |
+          zip -r update.zip . \
+            -x "uploads/*" "backup_*/*" ".reasonix/*" "install.php" ".git/*" \
+            -x "*.zip" ".github/*" ".env*" "deploy.sh" "deploy.bat" "*.md"
+          ls -lh update.zip
+
+      - name: 生成更新说明
+        id: notes
+        run: |
+          PREV=$(git tag --sort=-version:refname | sed -n '2p')
+          {
+            echo "### 更新内容"
+            echo ""
+            if [ -n "$PREV" ] && git rev-parse -q --verify "$PREV" >/dev/null 2>&1; then
+              git log --oneline --no-decorate "$PREV..HEAD" | sed 's/^/- /'
+            else
+              echo "- 初始发布"
+            fi
+          } > /tmp/release_notes.md
+          echo "--- Release 说明 ---"
+          cat /tmp/release_notes.md
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          body_path: /tmp/release_notes.md
+          files: update.zip
+          draft: false
+          prerelease: false
+
+      - name: 同步 version.json 到 main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B main origin/main
+          cp /tmp/version.json.new version.json
+          git add version.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: 更新 version.json 至 ${{ steps.meta.outputs.version }}"
+            git push origin main
+          else
+            echo "version.json 无需变更"
+          fi

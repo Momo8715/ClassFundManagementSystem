@@ -28,6 +28,17 @@
 zip -r update.zip . -x "uploads/*" "backup_*/*" ".reasonix/*" "install.php" ".git/*" "*.zip"
 ```
 
+> 💡 **推荐：使用 GitHub Actions 自动打包发布**
+>
+> 仓库已内置自动化工作流（`.github/workflows/release.yml`），推送 `v*` 格式的 tag 后会自动完成：更新 `version.json` → 打包 `update.zip` → 创建 Release → 上传附件 → 同步 `version.json` 回 main。**无需手动打包和上传**，只需执行：
+>
+> ```bash
+> git add -A && git commit -m "v1.0.1" && git push
+> git tag v1.0.1 && git push origin v1.0.1
+> ```
+>
+> 升级地址仍指向 `releases/latest/download/update.zip`，自动发布后即可直接使用。
+
 ### 第三步：在 GitHub 创建 Release
 
 1. 打开 https://github.com/Momo8715/ClassFundManagementSystem/releases
