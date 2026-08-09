@@ -19,13 +19,13 @@
 将项目文件打包为 `update.zip`：
 
 - **不要包含** `uploads/`、`backup_*`、`.reasonix/` 目录
-- **不要包含** `install.php`（防止覆盖已安装站点的配置）
+- **包含** `install.php`（新用户下载后需要安装向导；已安装站点因 `db_config.json` 存在会自动跳过安装流程，不受影响）
 - 只需包含 `.php`、`.js`、`.css`、`.sql`、`.htaccess` 等核心文件
 
 打包命令（在项目根目录执行）：
 
 ```bash
-zip -r update.zip . -x "uploads/*" "backup_*/*" ".reasonix/*" "install.php" ".git/*" "*.zip"
+zip -r update.zip . -x "uploads/*" "backup_*/*" ".reasonix/*" ".git/*" "*.zip"
 ```
 
 > 💡 **推荐：使用 GitHub Actions 自动打包发布**

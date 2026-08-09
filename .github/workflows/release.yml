@@ -46,7 +46,7 @@ jobs:
       - name: 打包 update.zip
         run: |
           zip -r update.zip . \
-            -x "uploads/*" "backup_*/*" ".reasonix/*" "install.php" ".git/*" \
+            -x "uploads/*" "backup_*/*" ".reasonix/*" ".git/*" \
             -x "*.zip" ".github/*" ".env*" "deploy.sh" "deploy.bat" "*.md"
           ls -lh update.zip
 
