@@ -10,6 +10,13 @@
 
 ## 发布新版本流程
 
+### 版本号命名规范
+
+- **新功能发布**：使用两段格式 `1.x`（如 `1.2`、`1.3`），tag 为 `v1.2`、`v1.3`
+- **Bug 修复**：使用三段格式 `1.x.x`（如 `1.1.1`、`1.2.1`），tag 为 `v1.1.1`、`v1.2.1`
+
+> 通过版本号可直接识别发布类型：两段 = 新功能，三段 = bug 修复。
+
 ### 第一步：修改代码
 
 在你的本地项目中完成代码修改，测试无误。
@@ -33,8 +40,8 @@ zip -r update.zip . -x "uploads/*" "backup_*/*" ".reasonix/*" ".git/*" "*.zip"
 > 仓库已内置自动化工作流（`.github/workflows/release.yml`），推送 `v*` 格式的 tag 后会自动完成：更新 `version.json` → 打包 `update.zip` → 创建 Release → 上传附件 → 同步 `version.json` 回 main。**无需手动打包和上传**，只需执行：
 >
 > ```bash
-> git add -A && git commit -m "v1.0.1" && git push
-> git tag v1.0.1 && git push origin v1.0.1
+> git add -A && git commit -m "v1.2" && git push
+> git tag v1.2 && git push origin v1.2
 > ```
 >
 > 升级地址仍指向 `releases/latest/download/update.zip`，自动发布后即可直接使用。
@@ -43,7 +50,7 @@ zip -r update.zip . -x "uploads/*" "backup_*/*" ".reasonix/*" ".git/*" "*.zip"
 
 1. 打开 https://github.com/Momo8715/ClassFundManagementSystem/releases
 2. 点击 **Draft a new release**
-3. 填写版本号，例如 `v1.0.1`（Tag 会自动创建）
+3. 填写版本号，例如 `v1.2`（新功能）或 `v1.1.1`（bug 修复），Tag 会自动创建
 4. 填写更新说明
 5. 点击 **Attach binaries** 上传 `update.zip`
 6. 点击 **Publish release**
@@ -54,7 +61,7 @@ zip -r update.zip . -x "uploads/*" "backup_*/*" ".reasonix/*" ".git/*" "*.zip"
 
 ```json
 {
-    "version": "1.0.1",
+    "version": "1.2",
     "notes": "修复xxx问题，新增xxx功能",
     "url": "https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip"
 }
@@ -64,7 +71,7 @@ zip -r update.zip . -x "uploads/*" "backup_*/*" ".reasonix/*" ".git/*" "*.zip"
 
 ```bash
 git add version.json
-git commit -m "发布 v1.0.1"
+git commit -m "发布 v1.2"
 git push
 ```
 

@@ -3,8 +3,9 @@
 # 一键部署脚本：GitHub 发布 + 宝塔面板自动上传
 #
 # 用法：
-#   ./deploy.sh v1.1.0          # 发布并部署到宝塔
-#   ./deploy.sh v1.1.0 --bt     # 只上传到宝塔（跳过 GitHub 发布）
+#   ./deploy.sh v1.2          # 发布新功能并部署到宝塔
+#   ./deploy.sh v1.1.1        # 修复 bug 并部署到宝塔
+#   ./deploy.sh v1.2 --bt     # 只上传到宝塔（跳过 GitHub 发布）
 #
 # 流程：
 #   git 提交推送 → 打 tag 触发 Actions → 等待 Release 生成
@@ -33,7 +34,7 @@ SKIP_GITHUB=false
 
 if [ -z "$VERSION" ]; then
   echo "❌ 用法: ./deploy.sh <版本号> [--bt]"
-  echo "   示例: ./deploy.sh v1.1.0"
+  echo "   示例: ./deploy.sh v1.2（新功能）  或  ./deploy.sh v1.1.1（bug修复）"
   exit 1
 fi
 
