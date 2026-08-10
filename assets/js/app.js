@@ -181,7 +181,7 @@
         if (pg) pg.classList.add('active');
         var nv = document.querySelector('[data-page="' + p + '"]');
         if (nv) nv.classList.add('active');
-        var handlers = { dashboard: renderDashboard, transactions: renderTransactions, students: renderStudents, roster: renderRoster, payments: renderPayments, security: renderSecurity, recycle: renderRecycle, logs: renderLogs };
+        var handlers = { dashboard: renderDashboard, transactions: renderTransactions, report: renderReport, students: renderStudents, roster: renderRoster, payments: renderPayments, security: renderSecurity, recycle: renderRecycle, logs: renderLogs };
         if (handlers[p]) handlers[p]();
     }
 
@@ -312,6 +312,69 @@
             if (d.total_pages > 1) { pagHtml = '<div class="pagination">'; for (var i = 1; i <= d.total_pages; i++) pagHtml += '<button class="' + (i === page ? 'active' : '') + '" onclick="window._renderTxPage(' + i + ')">' + i + '</button>'; pagHtml += '</div>'; }
             document.getElementById('transactionPagination').innerHTML = pagHtml;
         } catch (e) { toast(e.message, 'error'); }
+    }
+
+    // ========== 学期汇总报表 ==========
+    async function renderReport() {
+        try {
+            var ySel = document.getElementById('reportYear');
+            if (ySel.options.length === 0) {
+                var cy = new Date().getFullYear();
+                for (var i = 0; i < 6; i++) {
+                    var o = document.createElement('option');
+                    o.value = String(cy - i);
+                    o.textContent = (cy - i) + ' 年';
+                    ySel.appendChild(o);
+                }
+                ySel.value = String(cy);
+            }
+            var p = { year: ySel.value, semester: document.getElementById('reportSemester').value };
+            showLoading('reportContent');
+            var d = await api('report_semester', p);
+            var s = d.summary, pd = d.period;
+
+            // 汇总卡片
+            var html = '<div class="cards">' +
+                '<div class="card"><div class="card-label">📆 期初余额</div><div class="card-value" style="color:var(--text)">¥' + s.begin_balance.toFixed(2) + '</div><div class="card-sub">学期开始前累计</div></div>' +
+                '<div class="card"><div class="card-label">💰 总收入</div><div class="card-value income">¥' + s.total_income.toFixed(2) + '</div><div class="card-sub">' + s.income_count + ' 笔</div></div>' +
+                '<div class="card"><div class="card-label">💸 总支出</div><div class="card-value expense">¥' + s.total_expense.toFixed(2) + '</div><div class="card-sub">' + s.expense_count + ' 笔</div></div>' +
+                '<div class="card"><div class="card-label">🏦 期末结余</div><div class="card-value balance">¥' + s.balance.toFixed(2) + '</div><div class="card-sub">' + (s.balance >= 0 ? '✅ 正常' : '⚠️ 超支') + '</div></div>' +
+                '<div class="card"><div class="card-label">🎯 班费收缴率</div><div class="card-value" style="color:' + (s.collect_rate >= 90 ? 'var(--success)' : '#f59e0b') + '">' + s.collect_rate + '%</div><div class="card-sub">¥' + s.collected_amount.toFixed(2) + ' / 应收 ¥' + s.expected_amount.toFixed(2) + '（' + s.rounds + ' 轮）</div></div>' +
+                '</div>';
+
+            // 分类汇总
+            var inc = [], exp = [];
+            (d.by_category || []).forEach(function (c) { (c.type === 'income' ? inc : exp).push(c); });
+            html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">';
+            html += '<div><h4 style="margin-bottom:8px;color:var(--success)">📥 收入分类</h4><div class="table-wrap">' + catTable(inc) + '</div></div>';
+            html += '<div><h4 style="margin-bottom:8px;color:var(--danger)">📤 支出分类</h4><div class="table-wrap">' + catTable(exp) + '</div></div>';
+            html += '</div>';
+
+            // 月度趋势
+            html += '<h4 style="margin-top:16px;color:var(--text-secondary)">📅 月度收支明细</h4><div class="table-wrap">';
+            var mh = (d.by_month || []).length === 0 ? '<div class="empty">该学期暂无收支记录</div>' :
+                '<table><thead><tr><th>月份</th><th>收入</th><th>支出</th><th>净额</th></tr></thead><tbody>' +
+                d.by_month.map(function (m) {
+                    var net = Number(m.net);
+                    return '<tr><td>' + escapeHtml(m.month) + '</td><td style="color:var(--success)">+¥' + Number(m.income).toFixed(2) + '</td><td style="color:var(--danger)">-¥' + Number(m.expense).toFixed(2) + '</td><td style="font-weight:700;color:' + (net >= 0 ? 'var(--success)' : 'var(--danger)') + '">' + (net >= 0 ? '+' : '') + '¥' + net.toFixed(2) + '</td></tr>';
+                }).join('') + '</tbody></table>';
+            html += mh + '</div>';
+
+            // 报表头信息
+            html = '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">📌 ' + escapeHtml(pd.label) + '（' + escapeHtml(pd.start) + ' ~ ' + escapeHtml(pd.end) + '）</div>' + html;
+
+            document.getElementById('reportContent').innerHTML = html;
+        } catch (e) { toast(e.message, 'error'); }
+    }
+
+    function catTable(list) {
+        if (!list || list.length === 0) return '<div class="empty" style="padding:16px">暂无数据</div>';
+        var max = list[0].total || 1;
+        return '<table><thead><tr><th>分类</th><th>笔数</th><th>金额</th><th style="width:30%">占比</th></tr></thead><tbody>' +
+            list.map(function (c) {
+                var pct = Math.round(Number(c.total) / max * 100);
+                return '<tr><td>' + escapeHtml(c.category) + '</td><td>' + c.cnt + '</td><td style="font-weight:600">¥' + Number(c.total).toFixed(2) + '</td><td><div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden"><div style="width:' + pct + '%;height:100%;background:' + (c.type === 'income' ? 'var(--success)' : 'var(--danger)') + '"></div></div></td></tr>';
+            }).join('') + '</tbody></table>';
     }
 
     function showAddTransaction() {

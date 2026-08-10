@@ -91,6 +91,9 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
                 <button data-page="transactions" onclick="switchPage('transactions')">
                     <span class="icon">💰</span> 收支记录
                 </button>
+                <button data-page="report" onclick="switchPage('report')" id="navReport">
+                    <span class="icon">📈</span> 学期报表
+                </button>
                 <button data-page="import" onclick="switchPage('import')" id="navImport">
                     <span class="icon">📥</span> 导入数据
                 </button>
@@ -136,6 +139,23 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
                 </div>
                 <div class="section-header"><h3>📋 最近收支记录</h3></div>
                 <div class="table-wrap" id="dashboardRecent"></div>
+            </div>
+
+            <!-- 学期报表 -->
+            <div class="page" id="page-report">
+                <div class="section-header">
+                    <h3>📈 学期汇总报表</h3>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <select id="reportYear" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)"></select>
+                        <select id="reportSemester" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                            <option value="spring">春季学期</option>
+                            <option value="autumn">秋季学期</option>
+                        </select>
+                        <button class="btn btn-primary btn-sm" onclick="renderReport()">🔍 生成报表</button>
+                        <button class="btn btn-outline btn-sm" onclick="window.print()">🖨️ 打印</button>
+                    </div>
+                </div>
+                <div id="reportContent"></div>
             </div>
 
             <!-- 收支记录 -->

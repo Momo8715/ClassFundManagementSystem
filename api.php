@@ -27,6 +27,7 @@ require_once __DIR__ . '/src/payments.php';
 require_once __DIR__ . '/src/logs.php';
 require_once __DIR__ . '/src/security.php';
 require_once __DIR__ . '/src/import_export.php';
+require_once __DIR__ . '/src/report.php';
 require_once __DIR__ . '/src/upgrade.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
@@ -51,9 +52,12 @@ switch ($action) {
         handleChangePassword();
         break;
 
-    // ========== 仪表盘 ==========
+    // ========== 仪表盘 & 报表 ==========
     case 'dashboard':
         handleDashboard();
+        break;
+    case 'report_semester':
+        handleReportSemester();
         break;
 
     // ========== 收支记录 ==========
