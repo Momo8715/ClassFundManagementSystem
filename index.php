@@ -155,7 +155,29 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
                         <button class="btn btn-outline btn-sm" onclick="window.print()">🖨️ 打印</button>
                     </div>
                 </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
+                        <h4 style="font-size:13px;margin-bottom:10px">📊 月度收支对比</h4>
+                        <canvas id="reportChartBar" height="200"></canvas>
+                    </div>
+                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
+                        <h4 style="font-size:13px;margin-bottom:10px">🍩 支出分类占比</h4>
+                        <canvas id="reportChartPie" height="200"></canvas>
+                    </div>
+                </div>
                 <div id="reportContent"></div>
+                <div style="margin-top:24px;background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
+                    <h4 style="font-size:14px;margin-bottom:10px">📚 学期管理</h4>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+                        <input type="text" id="semName" placeholder="学期名称，如：2025秋季学期" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:180px;background:var(--bg-card);color:var(--text)">
+                        <input type="date" id="semStart" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                        <span style="font-size:12px;color:var(--text-secondary)">至</span>
+                        <input type="date" id="semEnd" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                        <button class="btn btn-primary btn-sm" onclick="window._createSemester()">➕ 新建学期</button>
+                        <span style="font-size:11px;color:var(--text-secondary)">期末后归档当前学期，即为「结转」</span>
+                    </div>
+                    <div id="semesterTable"></div>
+                </div>
             </div>
 
             <!-- 收支记录 -->
@@ -170,6 +192,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
                         </select>
                         <input type="month" id="filterMonth" onchange="window._renderTxPage(1)">
                         <input type="text" id="filterSearch" placeholder="搜索..." oninput="window._renderTxPage(1)">
+                        <button class="btn btn-danger btn-sm" onclick="window._batchDeleteTx()" id="btnBatchDel" style="display:none">🗑️ 批量删除</button>
                         <button class="btn btn-primary" onclick="showAddTransaction()" id="btnAddTx" style="display:none">+ 添加</button>
                     </div>
                 </div>
@@ -249,6 +272,11 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
                     <div><h4 style="margin-bottom:8px;color:var(--danger)">⚠️ 未缴纳</h4><div class="table-wrap" id="unpaidTable"></div></div>
                 </div>
                 <h4 style="margin-top:12px;color:var(--text-secondary)">📋 花名册缴费管理</h4>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                    <button class="btn btn-outline btn-sm" onclick="window._batchExempt(1)">🟢 批量设为免缴</button>
+                    <button class="btn btn-outline btn-sm" onclick="window._batchExempt(0)">🔴 批量设为应缴</button>
+                    <span style="font-size:11px;color:var(--text-secondary)">勾选下方名单后操作</span>
+                </div>
                 <div class="table-wrap" id="rosterPayTable"></div>
                 <h4 style="margin-top:16px;color:var(--primary)">📅 各轮缴费明细</h4>
                 <div id="roundsTable"></div>
@@ -291,6 +319,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
                     <div class="toolbar">
                         <select id="logFilterUser" onchange="window._renderLogs(1)"><option value="0">全部用户</option></select>
                         <select id="logFilterAction" onchange="window._renderLogs(1)"><option value="">全部操作</option></select>
+                        <a href="api.php?action=export_logs" class="btn btn-outline btn-sm" style="text-decoration:none" onclick="return exportLogsFiltered()">📥 导出 CSV</a>
                     </div>
                 </div>
                 <div class="table-wrap" id="logsTable"></div>
@@ -346,13 +375,13 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
                 </select>
             </div>
             <div class="form-group">
-                <label>凭证图片（可选）</label>
+                <label>凭证图片（可选，可多张）</label>
                 <div style="display:flex;gap:8px">
-                    <input type="file" id="txImageFile" accept="image/*" style="flex:1">
-                    <button type="button" class="btn btn-outline btn-sm" onclick="uploadTxImage()">📤 上传</button>
+                    <input type="file" id="txImageFile" accept="image/*" multiple style="flex:1">
+                    <button type="button" class="btn btn-outline btn-sm" onclick="uploadTxImages()">📤 上传</button>
                 </div>
                 <div id="txImagePreview" style="margin-top:6px"></div>
-                <input type="hidden" id="txImagePath">
+                <input type="hidden" id="txImages">
             </div>
             <input type="hidden" id="txId">
             <input type="hidden" id="txPayerIds">

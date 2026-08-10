@@ -101,3 +101,65 @@ function handleReportSemester() {
         'by_month'    => $byMonth,
     ]);
 }
+
+// ==================== 学期管理 ====================
+
+/** 计算某日期前的累计余额 */
+function balanceBefore(string $date): float {
+    $stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE -amount END),0) FROM transactions WHERE deleted_at IS NULL AND date < :d");
+    $stmt->execute([':d' => $date]);
+    return round((float)$stmt->fetchColumn(), 2);
+}
+
+function handleSemesters(string $method) {
+    switch ($method) {
+        case 'GET':
+            requirePermission('viewTransactions');
+            $rows = db()->query("SELECT * FROM semesters ORDER BY start_date DESC, id DESC")->fetchAll();
+            foreach ($rows as &$s) {
+                $s['begin_balance'] = balanceBefore($s['start_date']);
+                // 期末余额 = 期末日期（含）前的累计余额
+                $stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE -amount END),0) FROM transactions WHERE deleted_at IS NULL AND date <= :d");
+                $stmt->execute([':d' => $s['end_date']]);
+                $s['end_balance'] = round((float)$stmt->fetchColumn(), 2);
+            }
+            jsonOutput(['semesters' => $rows]);
+            break;
+
+        case 'POST':
+            requirePermission('manageAllAccounts');
+            requireCsrfToken();
+            $input = jsonInput();
+            $action = $input['action'] ?? '';
+
+            if ($action === 'create') {
+                $name = trim($input['name'] ?? '');
+                $start = $input['start_date'] ?? '';
+                $end = $input['end_date'] ?? '';
+                if (empty($name)) jsonOutput(['error' => '请填写学期名称'], 400);
+                if (!isValidDate($start) || !isValidDate($end)) jsonOutput(['error' => '日期格式无效'], 400);
+                if ($start > $end) jsonOutput(['error' => '开始日期不能晚于结束日期'], 400);
+
+                db()->prepare("INSERT INTO semesters (name, start_date, end_date) VALUES (:n, :s, :e)")
+                    ->execute([':n' => $name, ':s' => $start, ':e' => $end]);
+                $user = currentUser();
+                addLog($user['id'], $user['username'], 'create_semester', 'semester', (int)db()->lastInsertId(), ['name' => $name]);
+                jsonOutput(['ok' => true]);
+            }
+
+            if ($action === 'archive') {
+                $id = intval($input['id'] ?? 0);
+                if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
+                db()->prepare("UPDATE semesters SET status='archived' WHERE id=:id AND status='active'")->execute([':id' => $id]);
+                $user = currentUser();
+                addLog($user['id'], $user['username'], 'archive_semester', 'semester', $id);
+                jsonOutput(['ok' => true]);
+            }
+
+            jsonOutput(['error' => '不支持的操作'], 400);
+            break;
+
+        default:
+            jsonOutput(['error' => '不支持的方法'], 405);
+    }
+}

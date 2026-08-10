@@ -59,10 +59,16 @@ switch ($action) {
     case 'report_semester':
         handleReportSemester();
         break;
+    case 'semesters':
+        handleSemesters($method);
+        break;
 
     // ========== 收支记录 ==========
     case 'transactions':
         handleTransactions($method);
+        break;
+    case 'transactions_batch':
+        handleTransactionsBatchDelete();
         break;
 
     // ========== 导入导出 ==========
@@ -80,6 +86,9 @@ switch ($action) {
         break;
     case 'export':
         handleExport();
+        break;
+    case 'receipt':
+        handleReceipt();
         break;
     case 'export_unpaid':
         handleExportUnpaid();
@@ -110,6 +119,9 @@ switch ($action) {
     // ========== 操作日志 ==========
     case 'logs':
         handleLogs();
+        break;
+    case 'export_logs':
+        handleExportLogs();
         break;
 
     // ========== 安全 & 回收站 ==========

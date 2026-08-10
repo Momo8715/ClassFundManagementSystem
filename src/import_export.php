@@ -301,6 +301,103 @@ function handleExport() {
     exit;
 }
 
+// ==================== 收据导出 ====================
+
+/** 人民币金额大写转换 */
+function amountToChinese(float $amount): string {
+    $digits = ['零','壹','贰','叁','肆','伍','陆','柒','捌','玖'];
+    $units = ['','拾','佰','仟'];
+    $bigUnits = ['','万','亿'];
+    $amount = round($amount, 2);
+    $intPart = (int)floor($amount);
+    $decPart = (int)round(($amount - $intPart) * 100);
+    if ($amount == 0) return '零元整';
+    $intStr = (string)$intPart;
+    $len = strlen($intStr);
+    $result = '';
+    $zeroFlag = false;
+    $unitPos = 0;
+    for ($i = 0; $i < $len; $i++) {
+        $digit = (int)$intStr[$i];
+        $pos = $len - 1 - $i;
+        if ($digit === 0) {
+            $zeroFlag = true;
+            if ($pos % 4 === 0 && $pos > 0) { $result .= $bigUnits[(int)($pos / 4)]; $zeroFlag = false; }
+        } else {
+            if ($zeroFlag) { $result .= '零'; $zeroFlag = false; }
+            $result .= $digits[$digit] . $units[$pos % 4] . (($pos % 4 === 0 && $pos > 0) ? $bigUnits[(int)($pos / 4)] : '');
+        }
+    }
+    $result .= '元';
+    if ($decPart === 0) {
+        $result .= '整';
+    } else {
+        $jiao = (int)($decPart / 10); $fen = $decPart % 10;
+        if ($jiao > 0) $result .= $digits[$jiao] . '角';
+        elseif ($fen > 0) $result .= '零';
+        if ($fen > 0) $result .= $digits[$fen] . '分';
+    }
+    return $result;
+}
+
+/** 生成打印友好收据页（浏览器打印/另存 PDF） */
+function handleReceipt() {
+    requirePermission('viewTransactions');
+
+    $id = intval($_GET['id'] ?? 0);
+    if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
+
+    $stmt = db()->prepare("SELECT t.*, u.username AS recorder_name FROM transactions t LEFT JOIN users u ON t.recorded_by=u.id WHERE t.id=:id AND t.deleted_at IS NULL");
+    $stmt->execute([':id' => $id]);
+    $tx = $stmt->fetch();
+    if (!$tx) jsonOutput(['error' => '记录不存在'], 404);
+
+    $isIncome = $tx['type'] === 'income';
+    $title = $isIncome ? '收 费 收 据' : '支 出 凭 证';
+    $amountCN = amountToChinese((float)$tx['amount']);
+
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>' . $title . '</title>
+    <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:"SimSun","Songti SC",serif; background:#f0f0f0; }
+    .page { width:210mm; min-height:140mm; margin:20px auto; background:#fff; padding:24mm 20mm; box-shadow:0 2px 12px rgba(0,0,0,.15); position:relative; }
+    h1 { text-align:center; font-size:26px; letter-spacing:8px; margin-bottom:18px; font-weight:700; }
+    .no { text-align:right; font-size:13px; margin-bottom:14px; color:#333; }
+    .no b { font-size:15px; }
+    table { width:100%; border-collapse:collapse; margin:8px 0 16px; }
+    td { border:1px solid #333; padding:10px 12px; font-size:15px; line-height:1.7; }
+    td.label { width:92px; background:#fafafa; text-align:center; font-weight:600; white-space:nowrap; }
+    .amount { font-size:19px; font-weight:700; letter-spacing:1px; }
+    .cn { font-size:14px; }
+    .footer { margin-top:26px; display:flex; justify-content:space-between; font-size:14px; }
+    .footer .box { text-align:center; }
+    .footer .line { width:120px; border-bottom:1px solid #333; height:22px; }
+    .footer .cap { margin-top:4px; font-size:12px; color:#555; }
+    .print-btn { display:block; margin:16px auto 40px; padding:10px 36px; font-size:15px; cursor:pointer; }
+    @media print { body { background:#fff; } .page { box-shadow:none; margin:0; width:auto; min-height:auto; } .print-btn { display:none; } }
+    </style></head><body>
+    <div class="page">
+        <h1>' . $title . '</h1>
+        <div class="no">编号：<b>CF-' . str_pad((string)$tx['id'], 6, '0', STR_PAD_LEFT) . '</b></div>
+        <table>
+            <tr><td class="label">日期</td><td>' . htmlspecialchars($tx['date']) . '</td><td class="label">类型</td><td>' . ($isIncome ? '收入（缴款）' : '支出') . '</td></tr>
+            <tr><td class="label">金额（大写）</td><td colspan="3" class="cn">' . htmlspecialchars($amountCN) . '</td></tr>
+            <tr><td class="label">金额（小写）</td><td colspan="3" class="amount">¥ ' . number_format((float)$tx['amount'], 2, '.', ',') . '</td></tr>
+            <tr><td class="label">事由</td><td colspan="3">' . htmlspecialchars($tx['description']) . '</td></tr>
+            <tr><td class="label">分类</td><td>' . htmlspecialchars($tx['category']) . ($tx['sub_category'] ? ' / ' . htmlspecialchars($tx['sub_category']) : '') . '</td><td class="label">经办人</td><td>' . htmlspecialchars($tx['recorder_name'] ?? '') . '</td></tr>
+        </table>
+        <div class="footer">
+            <div class="box"><div class="line"></div><div class="cap">缴款 / 经手人</div></div>
+            <div class="box"><div class="line"></div><div class="cap">财务委员</div></div>
+            <div class="box"><div class="line"></div><div class="cap">班主任</div></div>
+        </div>
+    </div>
+    <button class="print-btn" onclick="window.print()">🖨️ 打印 / 另存为 PDF</button>
+    </body></html>';
+    exit;
+}
+
 // ==================== xlsx 生成器 ====================
 function outputSimpleXlsx(string $filename, string $sheetName, array $headers, array $rows) {
     $tmpFile = tempnam(sys_get_temp_dir(), 'xlsx');

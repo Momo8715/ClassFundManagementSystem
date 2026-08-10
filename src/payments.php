@@ -158,6 +158,17 @@ function handleExpectedPayment(string $method) {
                         ':id' => intval($input['exempt_id'])
                     ]);
             }
+            // 批量设置免缴
+            if (isset($input['exempt_ids'])) {
+                $ids = $input['exempt_ids'];
+                if (is_string($ids)) $ids = json_decode($ids, true) ?: [];
+                $ids = array_values(array_filter(array_map('intval', (array)$ids), function ($v) { return $v > 0; }));
+                if (!empty($ids)) {
+                    $ph = implode(',', array_fill(0, count($ids), '?'));
+                    db()->prepare("UPDATE class_roster SET exempt=:e WHERE id IN ($ph)")
+                        ->execute(array_merge([intval($input['exempt'] ?? 1)], $ids));
+                }
+            }
             jsonOutput(['ok' => true]);
             break;
 

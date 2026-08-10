@@ -177,6 +177,19 @@ function autoMigrate(): void {
         // transactions.payer_ids 缴费学生
         $cols = $db->query("SHOW COLUMNS FROM transactions")->fetchAll(PDO::FETCH_COLUMN);
         if (!in_array('payer_ids', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN payer_ids TEXT DEFAULT NULL COMMENT '缴费学生ID(JSON数组或all)' AFTER description");
+        // transactions.images 多图凭证
+        if (!in_array('images', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN images TEXT DEFAULT NULL COMMENT '多图凭证(JSON数组)' AFTER image_path");
+
+        // semesters 学期表
+        $db->exec("CREATE TABLE IF NOT EXISTS semesters (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(50) NOT NULL,
+            start_date DATE NOT NULL,
+            end_date DATE NOT NULL,
+            status ENUM('active','archived') NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_name (name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学期管理'");
     } catch (Exception $e) {
         error_log('[班费系统] autoMigrate 失败: ' . $e->getMessage());
     }

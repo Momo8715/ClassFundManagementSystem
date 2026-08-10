@@ -17,10 +17,11 @@
     // ========== 全局状态 ==========
     var currentUser = null;
     var _t = '';
-    var chartTrend = null, chartPie = null;
+    var chartTrend = null, chartPie = null, reportBarChart = null, reportPieChart = null;
     var importPreviewData = [];
     var xlsxPreviewData = [];
     var txPage = 1;
+    var txImageList = [];
 
     // ========== 工具函数 ==========
 
@@ -171,6 +172,8 @@
         });
         document.getElementById('navStudents').style.display = (hasPerm('manageStudents') || hasPerm('manageAllAccounts')) ? '' : 'none';
         document.getElementById('btnAddTx').style.display = hasPerm('addTransaction') ? '' : 'none';
+        var bd = document.getElementById('btnBatchDel');
+        if (bd) bd.style.display = hasPerm('deleteTransaction') ? '' : 'none';
         updateSidebar();
     }
 
@@ -297,12 +300,16 @@
             if (list.length === 0) {
                 html = '<div class="empty"><div class="icon">📭</div>暂无记录</div>';
             } else {
-                html = '<table><thead><tr><th>ID</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th>分类</th><th>记录人</th>' + (ce || cd ? '<th>操作</th>' : '') + '</tr></thead><tbody>';
+                html = '<table><thead><tr>' + (cd ? '<th style="width:28px"><input type="checkbox" onclick="window._toggleAllTx(this)"></th>' : '') + '<th>ID</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th>分类</th><th>凭证</th><th>记录人</th>' + (ce || cd ? '<th>操作</th>' : '') + '</tr></thead><tbody>';
                 list.forEach(function (t) {
-                    html += '<tr><td>#' + t.id + '</td><td>' + escapeHtml(t.date) + '</td><td><span class="badge badge-' + (t.type === 'income' ? 'income' : 'expense') + '">' + (t.type === 'income' ? '收入' : '支出') + '</span></td>' +
+                    var imgs = [];
+                    if (t.images) { try { var ii = typeof t.images === 'string' ? JSON.parse(t.images) : t.images; if (Array.isArray(ii)) imgs = ii.filter(Boolean); } catch (e) {} }
+                    if (!imgs.length && t.image_path) imgs = [t.image_path];
+                    var imgCell = imgs.length ? '<td>' + imgs.map(function (p) { return '<a href="' + escapeHtml(p) + '" target="_blank"><img src="' + escapeHtml(p) + '" style="width:30px;height:24px;object-fit:cover;border-radius:4px;margin-right:2px;border:1px solid var(--border)"></a>'; }).join('') + '</td>' : '<td style="color:var(--text-secondary)">-</td>';
+                    html += '<tr>' + (cd ? '<td><input type="checkbox" class="txCb" value="' + t.id + '"></td>' : '') + '<td>#' + t.id + '</td><td>' + escapeHtml(t.date) + '</td><td><span class="badge badge-' + (t.type === 'income' ? 'income' : 'expense') + '">' + (t.type === 'income' ? '收入' : '支出') + '</span></td>' +
                         '<td style="font-weight:700;color:' + (t.type === 'income' ? 'var(--success)' : 'var(--danger)') + '">' + (t.type === 'income' ? '+' : '-') + '¥' + Number(t.amount).toFixed(2) + '</td>' +
                         '<td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.category) + '</td><td>' + escapeHtml(t.recorder_name || '未知') + '</td>';
-                    if (ce || cd) { html += '<td style="white-space:nowrap">' + (ce ? '<button class="btn btn-outline btn-sm" onclick="window._editTx(' + t.id + ')">✏️</button>' : '') + (cd ? '<button class="btn btn-danger btn-sm" onclick="window._deleteTx(' + t.id + ')" style="margin-left:4px">🗑️</button>' : '') + '</td>'; }
+                    if (ce || cd) { html += '<td style="white-space:nowrap">' + '<button class="btn btn-outline btn-sm" onclick="window._receipt(' + t.id + ')" title="收据">🧾</button> ' + (ce ? '<button class="btn btn-outline btn-sm" onclick="window._editTx(' + t.id + ')">✏️</button>' : '') + (cd ? '<button class="btn btn-danger btn-sm" onclick="window._deleteTx(' + t.id + ')" style="margin-left:4px">🗑️</button>' : '') + '</td>'; }
                     html += '</tr>';
                 });
                 html += '</tbody></table>';
@@ -360,11 +367,73 @@
                 }).join('') + '</tbody></table>';
             html += mh + '</div>';
 
-            // 报表头信息
+    // 报表头信息
             html = '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">📌 ' + escapeHtml(pd.label) + '（' + escapeHtml(pd.start) + ' ~ ' + escapeHtml(pd.end) + '）</div>' + html;
 
             document.getElementById('reportContent').innerHTML = html;
+
+            // 图表：月度收支柱状图 + 支出分类占比饼图
+            drawReportCharts(d);
+            renderSemesters();
         } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function renderSemesters() {
+        try {
+            var d = await api('semesters');
+            var list = d.semesters || [];
+            var box = document.getElementById('semesterTable');
+            if (!box) return;
+            if (!list.length) { box.innerHTML = '<div class="empty" style="padding:14px">暂无学期记录，可新建一个学期开始管理</div>'; return; }
+            box.innerHTML = '<table><thead><tr><th>学期</th><th>起止日期</th><th>期初余额</th><th>期末结余</th><th>状态</th>' + (hasPerm('manageAllAccounts') ? '<th>操作</th>' : '') + '</tr></thead><tbody>' +
+                list.map(function (s) {
+                    return '<tr><td><b>' + escapeHtml(s.name) + '</b></td><td>' + escapeHtml(s.start_date) + ' ~ ' + escapeHtml(s.end_date) + '</td><td>¥' + Number(s.begin_balance).toFixed(2) + '</td><td style="font-weight:600;color:' + (Number(s.end_balance) >= 0 ? 'var(--success)' : 'var(--danger)') + '">¥' + Number(s.end_balance).toFixed(2) + '</td><td>' + (s.status === 'active' ? '<span class="badge badge-income">进行中</span>' : '<span class="badge badge-role">已归档</span>') + '</td>' + (hasPerm('manageAllAccounts') && s.status === 'active' ? '<td><button class="btn btn-outline btn-sm" onclick="window._archiveSemester(' + s.id + ')">📦 结转归档</button></td>' : '<td>-</td>') + '</tr>';
+                }).join('') + '</tbody></table>';
+        } catch (e) {}
+    }
+
+    async function _createSemester() {
+        var name = document.getElementById('semName').value.trim();
+        var start = document.getElementById('semStart').value;
+        var end = document.getElementById('semEnd').value;
+        if (!name) return toast('请填写学期名称', 'error');
+        if (!start || !end) return toast('请选择起止日期', 'error');
+        try {
+            await api('semesters', { action: 'create', name: name, start_date: start, end_date: end }, 'POST');
+            toast('学期创建成功');
+            document.getElementById('semName').value = ''; document.getElementById('semStart').value = ''; document.getElementById('semEnd').value = '';
+            renderSemesters();
+        } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function _archiveSemester(id) {
+        if (!confirm('确定归档该学期？（归档后余额作为下一学期期初，历史数据可随时查看）')) return;
+        try {
+            await api('semesters', { action: 'archive', id: id }, 'POST');
+            toast('已结转归档');
+            renderSemesters();
+        } catch (e) { toast(e.message, 'error'); }
+    }
+
+    function drawReportCharts(d) {
+        if (!window.Chart) return;
+        var months = d.by_month || [];
+        var barEl = document.getElementById('reportChartBar');
+        if (barEl && months.length) {
+            var ctxB = barEl.getContext('2d');
+            if (reportBarChart) reportBarChart.destroy();
+            reportBarChart = new Chart(ctxB, { type: 'bar', data: { labels: months.map(function (m) { return m.month; }), datasets: [
+                { label: '收入', data: months.map(function (m) { return m.income; }), backgroundColor: 'rgba(16,185,129,.75)', borderRadius: 4 },
+                { label: '支出', data: months.map(function (m) { return m.expense; }), backgroundColor: 'rgba(244,63,94,.75)', borderRadius: 4 }
+            ]}, options: { responsive: true, plugins: { legend: { labels: { font: { size: 11 } } } }, scales: { y: { ticks: { font: { size: 10 } } }, x: { ticks: { font: { size: 10 } } } } } });
+        }
+        var exp = (d.by_category || []).filter(function (c) { return c.type === 'expense'; }).sort(function (a, b) { return b.total - a.total; }).slice(0, 6);
+        var pieEl = document.getElementById('reportChartPie');
+        if (pieEl && exp.length) {
+            var ctxP = pieEl.getContext('2d');
+            if (reportPieChart) reportPieChart.destroy();
+            reportPieChart = new Chart(ctxP, { type: 'doughnut', data: { labels: exp.map(function (c) { return c.category; }), datasets: [{ data: exp.map(function (c) { return c.total; }), backgroundColor: ['#6366f1','#f43f5e','#f59e0b','#10b981','#8b5cf6','#ec4899'] }] }, options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, padding: 10 } } } } });
+        }
     }
 
     function catTable(list) {
@@ -387,9 +456,9 @@
         document.getElementById('txDesc').value = '';
         document.getElementById('txCategory').value = '班费';
         document.getElementById('txSourceInfo').value = '';
-        document.getElementById('txImagePath').value = '';
         document.getElementById('txImageFile').value = '';
-        document.getElementById('txImagePreview').innerHTML = '';
+        txImageList = [];
+        renderTxImagePreview();
         document.getElementById('txPayerIds').value = '';
         document.getElementById('txExpected').value = '';
         document.getElementById('txPerPerson').value = '';
@@ -410,16 +479,17 @@
         document.getElementById('txDate').value = t.date;
         document.getElementById('txDesc').value = t.description;
         document.getElementById('txCategory').value = t.category;
-        document.getElementById('txImagePath').value = t.image_path || '';
         document.getElementById('txExpected').value = t.expected_amount || '';
         document.getElementById('txPayerIds').value = t.payer_ids || '';
+        txImageList = [];
+        if (t.images) { try { var imgs = typeof t.images === 'string' ? JSON.parse(t.images) : t.images; if (Array.isArray(imgs)) txImageList = imgs.filter(Boolean); } catch (e) {} }
+        if (!txImageList.length && t.image_path) txImageList = [t.image_path];
+        renderTxImagePreview();
         var subVal = document.getElementById('txSubCategory').value;
         document.getElementById('txSourceGroup').style.display = (subVal === '其他来源' ? 'block' : 'none');
         document.getElementById('txRosterGroup').style.display = (subVal === '班费收缴' ? 'block' : 'none');
         document.getElementById('txExpectedGroup').style.display = (subVal === '班费收缴' ? 'block' : 'none');
         document.getElementById('txPerPersonGroup').style.display = (subVal === '班费收缴' ? 'block' : 'none');
-        if (t.image_path) { document.getElementById('txImagePreview').innerHTML = '<img src="' + escapeHtml(t.image_path) + '" style="max-width:200px;max-height:120px;border-radius:6px">'; }
-        else { document.getElementById('txImagePreview').innerHTML = ''; }
         if (subVal === '班费收缴') {
             await loadRosterForTx();
             var pids = t.payer_ids;
@@ -457,7 +527,7 @@
         var subCat = document.getElementById('txSubCategory').value;
         var srcInfo = document.getElementById('txSourceInfo').value.trim();
         if (subCat === '其他来源' && !srcInfo) return toast('请填写来源信息', 'error');
-        var payload = { type: document.getElementById('txType').value, sub_category: subCat, source_info: subCat === '其他来源' ? srcInfo : '', amount: parseFloat(document.getElementById('txAmount').value), date: document.getElementById('txDate').value, description: document.getElementById('txDesc').value.trim(), category: document.getElementById('txCategory').value, image_path: document.getElementById('txImagePath').value, expected_amount: document.getElementById('txExpected').value || null };
+        var payload = { type: document.getElementById('txType').value, sub_category: subCat, source_info: subCat === '其他来源' ? srcInfo : '', amount: parseFloat(document.getElementById('txAmount').value), date: document.getElementById('txDate').value, description: document.getElementById('txDesc').value.trim(), category: document.getElementById('txCategory').value, image_path: txImageList.length ? txImageList[0] : '', images: txImageList, expected_amount: document.getElementById('txExpected').value || null };
         if (subCat === '班费收缴') { var cbs = document.querySelectorAll('.rosterCb:checked'); if (cbs.length === document.querySelectorAll('.rosterCb').length) payload.payer_ids = 'all'; else if (cbs.length > 0) payload.payer_ids = JSON.stringify(Array.from(cbs).map(function (cb) { return parseInt(cb.value); })); }
         if (!payload.amount || payload.amount <= 0) return toast('无效金额', 'error');
         if (!payload.date) return toast('请选择日期', 'error');
@@ -467,12 +537,35 @@
 
     function deleteTx(id) { if (!confirm('确定删除？')) return; api('transactions&id=' + id, {}, 'DELETE').then(function () { renderTransactions(); renderDashboard(); toast('已删除'); }).catch(function (e) { toast(e.message, 'error'); }); }
 
-    async function uploadTxImage() {
-        var file = document.getElementById('txImageFile').files[0];
-        if (!file) return toast('请先选择图片', 'error');
-        var fd = new FormData(); fd.append("csrf_" + "token", _t);
-        try { var r = await fetch(API + '?action=upload_image', { method: 'POST', body: fd }); var data = await r.json(); if (!r.ok) throw new Error(data.error); document.getElementById('txImagePath').value = data.path; document.getElementById('txImagePreview').innerHTML = '<img src="' + escapeHtml(data.path) + '" style="max-width:200px;max-height:120px;border-radius:6px">'; toast('图片上传成功'); } catch (e) { toast(e.message, 'error'); }
+    async function uploadTxImages() {
+        var files = document.getElementById('txImageFile').files;
+        if (!files || !files.length) return toast('请先选择图片', 'error');
+        for (var i = 0; i < files.length; i++) {
+            var fd = new FormData();
+            fd.append('image', files[i]);
+            fd.append("csrf_" + "token", _t);
+            try {
+                var r = await fetch(API + '?action=upload_image', { method: 'POST', body: fd });
+                var data = await r.json();
+                if (!r.ok) throw new Error(data.error);
+                txImageList.push(data.path);
+            } catch (e) { toast('第 ' + (i + 1) + ' 张上传失败: ' + e.message, 'error'); }
+        }
+        document.getElementById('txImageFile').value = '';
+        renderTxImagePreview();
+        if (txImageList.length) toast('已上传 ' + txImageList.length + ' 张图片');
     }
+
+    function renderTxImagePreview() {
+        var box = document.getElementById('txImagePreview');
+        if (!box) return;
+        if (!txImageList.length) { box.innerHTML = ''; return; }
+        box.innerHTML = txImageList.map(function (p, i) {
+            return '<div style="display:inline-block;position:relative;margin:4px"><img src="' + escapeHtml(p) + '" style="max-width:120px;max-height:90px;border-radius:6px;border:1px solid var(--border)"><span style="position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:18px;height:18px;line-height:18px;text-align:center;font-size:11px;cursor:pointer" onclick="window._removeTxImage(' + i + ')">×</span></div>';
+        }).join('');
+    }
+
+    function removeTxImage(i) { txImageList.splice(i, 1); renderTxImagePreview(); }
 
     // ========== 导入 ==========
     async function previewXlsx() {
@@ -498,6 +591,16 @@
 
     function banUser(id) { var r = prompt('请输入封禁理由：'); if (!r || !r.trim()) return; api('ban_user', { user_id: id, ban: 1, reason: r.trim() }, 'POST').then(function () { renderStudents(); toast('已封禁'); }).catch(function (e) { toast(e.message, 'error'); }); }
     function unbanUser(id) { if (!confirm('确定解除封禁？')) return; api('ban_user', { user_id: id, ban: 0 }, 'POST').then(function () { renderStudents(); toast('已解封'); }).catch(function (e) { toast(e.message, 'error'); }); }
+
+    function exportLogsFiltered() {
+        var p = [];
+        var uid = (document.getElementById('logFilterUser') || {}).value;
+        var act = (document.getElementById('logFilterAction') || {}).value;
+        if (uid && uid !== '0') p.push('user_id=' + encodeURIComponent(uid));
+        if (act) p.push('log_action=' + encodeURIComponent(act));
+        window.location.href = 'api.php?action=export_logs' + (p.length ? '&' + p.join('&') : '');
+        return false;
+    }
 
     function showAddStudent() { document.getElementById('modalStudentTitle').textContent = '添加用户'; document.getElementById('stuId').value = ''; document.getElementById('stuName').value = ''; document.getElementById('stuPass').value = '123456'; document.querySelectorAll('#stuRoles input').forEach(function (cb) { cb.checked = false; }); document.querySelector('#stuRoles input[value="student"]').checked = true; if (!hasPerm('manageAllAccounts')) { document.querySelectorAll('#stuRoles input[value="head_teacher"], #stuRoles input[value="admin"]').forEach(function (cb) { cb.disabled = true; cb.checked = false; }); } else { document.querySelectorAll('#stuRoles input').forEach(function (cb) { cb.disabled = false; }); } openModal('modalStudent'); }
 
@@ -525,7 +628,33 @@
     function deleteRoster(id) { if (!confirm('确定删除？')) return; api('roster&id=' + id, {}, 'DELETE').then(function () { renderRoster(); toast('已删除'); }).catch(function (e) { toast(e.message, 'error'); }); }
 
     // ========== 缴费 ==========
-    async function renderPayments() { try { var r = await Promise.all([api('payments'), api('expected_payment')]); var d = r[0], ep = r[1]; document.getElementById('perPersonAmt').value = ep.per_person || ''; var ro = ep.roster || [], ne = ro.filter(function (s) { return !s.exempt; }), et = (ep.per_person || 0) * ne.length; document.getElementById('paymentSummary').innerHTML = '<div class="card"><div class="card-label">👥 花名册人数</div><div class="card-value" style="color:#6366f1">' + d.roster_count + '</div></div><div class="card"><div class="card-label">💰 总收款</div><div class="card-value income">¥' + d.total_collected.toFixed(2) + '</div></div><div class="card"><div class="card-label">✅ 已缴纳</div><div class="card-value income">' + d.paid_count + '人</div></div><div class="card"><div class="card-label">⚠️ 未缴纳</div><div class="card-value expense">' + d.unpaid_count + '人</div></div><div class="card"><div class="card-label">🎯 应缴总额</div><div class="card-value" style="color:#8b5cf6">¥' + et.toFixed(2) + '</div><div class="card-sub">' + ne.length + '人 × ¥' + (ep.per_person || 0) + '</div></div>'; var ph = ''; if (d.rounds && d.rounds.length) { d.rounds.forEach(function (rd, i) { ph += '<div style="background:var(--bg-card);border-radius:8px;padding:10px 14px;margin-bottom:6px;box-shadow:var(--shadow)"><b>#' + (i + 1) + ' ' + escapeHtml(rd.date) + '</b> ' + escapeHtml(rd.description) + ' <span style="color:var(--success)">¥' + (rd.amount || 0).toFixed(2) + '</span><br><span style="font-size:11px">已缴' + rd.paid_count + '人: ' + rd.paid_list.map(function (p) { return escapeHtml(p.name); }).join('、') + '</span><br><span style="font-size:11px;color:var(--danger)">未缴' + rd.unpaid_count + '人: ' + rd.unpaid_list.map(function (p) { return escapeHtml(p.name); }).join('、') + '</span></div>'; }); } else { ph = '<div class="empty">暂无缴费记录</div>'; } document.getElementById('paidTable').innerHTML = ph; document.getElementById('rosterPayTable').innerHTML = ro.length ? '<table><thead><tr><th>姓名</th><th>状态</th>' + (hasPerm('manageRoster') ? '<th>操作</th>' : '') + '</tr></thead><tbody>' + ro.map(function (s) { return '<tr><td>' + escapeHtml(s.name) + '</td><td>' + (s.exempt ? '<span class="badge badge-role">免缴</span>' : '<span class="badge badge-income">应缴</span>') + '</td>' + (hasPerm('manageRoster') ? '<td><button class="btn btn-outline btn-sm" onclick="window._toggleExempt(' + s.id + ',' + (s.exempt ? 1 : 0) + ')">' + (s.exempt ? '设为应缴' : '设为免缴') + '</button></td>' : '') + '</tr>'; }).join('') + '</tbody></table>' : '<div class="empty">花名册为空</div>'; document.getElementById('unpaidTable').innerHTML = d.unpaid_list.length === 0 ? '<div class="empty" style="padding:20px;color:var(--success)">🎉 全部已缴！</div>' : '<table><thead><tr><th>姓名</th><th>状态</th></tr></thead><tbody>' + d.unpaid_list.map(function (p) { return '<tr><td>' + escapeHtml(p.name) + '</td><td><span class="badge badge-expense">未缴纳</span></td></tr>'; }).join('') + '</tbody></table>'; } catch (e) { toast(e.message, 'error'); } }
+    async function renderPayments() { try { var r = await Promise.all([api('payments'), api('expected_payment')]); var d = r[0], ep = r[1]; document.getElementById('perPersonAmt').value = ep.per_person || ''; var ro = ep.roster || [], ne = ro.filter(function (s) { return !s.exempt; }), et = (ep.per_person || 0) * ne.length; document.getElementById('paymentSummary').innerHTML = '<div class="card"><div class="card-label">👥 花名册人数</div><div class="card-value" style="color:#6366f1">' + d.roster_count + '</div></div><div class="card"><div class="card-label">💰 总收款</div><div class="card-value income">¥' + d.total_collected.toFixed(2) + '</div></div><div class="card"><div class="card-label">✅ 已缴纳</div><div class="card-value income">' + d.paid_count + '人</div></div><div class="card"><div class="card-label">⚠️ 未缴纳</div><div class="card-value expense">' + d.unpaid_count + '人</div></div><div class="card"><div class="card-label">🎯 应缴总额</div><div class="card-value" style="color:#8b5cf6">¥' + et.toFixed(2) + '</div><div class="card-sub">' + ne.length + '人 × ¥' + (ep.per_person || 0) + '</div></div>'; var ph = ''; if (d.rounds && d.rounds.length) { d.rounds.forEach(function (rd, i) { ph += '<div style="background:var(--bg-card);border-radius:8px;padding:10px 14px;margin-bottom:6px;box-shadow:var(--shadow)"><b>#' + (i + 1) + ' ' + escapeHtml(rd.date) + '</b> ' + escapeHtml(rd.description) + ' <span style="color:var(--success)">¥' + (rd.amount || 0).toFixed(2) + '</span><br><span style="font-size:11px">已缴' + rd.paid_count + '人: ' + rd.paid_list.map(function (p) { return escapeHtml(p.name); }).join('、') + '</span><br><span style="font-size:11px;color:var(--danger)">未缴' + rd.unpaid_count + '人: ' + rd.unpaid_list.map(function (p) { return escapeHtml(p.name); }).join('、') + '</span></div>'; }); } else { ph = '<div class="empty">暂无缴费记录</div>'; } document.getElementById('paidTable').innerHTML = ph; document.getElementById('rosterPayTable').innerHTML = ro.length ? '<table><thead><tr>' + (hasPerm('manageRoster') ? '<th style="width:28px"><input type="checkbox" onclick="window._toggleAllRoster(this)"></th>' : '') + '<th>姓名</th><th>状态</th>' + (hasPerm('manageRoster') ? '<th>操作</th>' : '') + '</tr></thead><tbody>' + ro.map(function (s) { return '<tr>' + (hasPerm('manageRoster') ? '<td><input type="checkbox" class="rosterPayCb" value="' + s.id + '"></td>' : '') + '<td>' + escapeHtml(s.name) + '</td><td>' + (s.exempt ? '<span class="badge badge-role">免缴</span>' : '<span class="badge badge-income">应缴</span>') + '</td>' + (hasPerm('manageRoster') ? '<td><button class="btn btn-outline btn-sm" onclick="window._toggleExempt(' + s.id + ',' + (s.exempt ? 1 : 0) + ')">' + (s.exempt ? '设为应缴' : '设为免缴') + '</button></td>' : '') + '</tr>'; }).join('') + '</tbody></table>' : '<div class="empty">花名册为空</div>'; document.getElementById('unpaidTable').innerHTML = d.unpaid_list.length === 0 ? '<div class="empty" style="padding:20px;color:var(--success)">🎉 全部已缴！</div>' : '<table><thead><tr><th>姓名</th><th>状态</th></tr></thead><tbody>' + d.unpaid_list.map(function (p) { return '<tr><td>' + escapeHtml(p.name) + '</td><td><span class="badge badge-expense">未缴纳</span></td></tr>'; }).join('') + '</tbody></table>'; } catch (e) { toast(e.message, 'error'); } }
+
+    function _toggleAllTx(el) { var cbs = document.querySelectorAll('.txCb'); for (var i = 0; i < cbs.length; i++) cbs[i].checked = el.checked; }
+    function _toggleAllRoster(el) { var cbs = document.querySelectorAll('.rosterPayCb'); for (var i = 0; i < cbs.length; i++) cbs[i].checked = el.checked; }
+    async function _batchDeleteTx() {
+        if (!confirm('确定批量删除选中的记录？（可在回收站恢复）')) return;
+        var ids = [];
+        var cbs = document.querySelectorAll('.txCb:checked');
+        for (var i = 0; i < cbs.length; i++) ids.push(parseInt(cbs[i].value, 10));
+        if (!ids.length) return toast('请先勾选要删除的记录', 'error');
+        try {
+            var d = await api('transactions_batch', { ids: ids }, 'POST');
+            toast('已删除 ' + d.deleted + ' 条记录');
+            _renderTxPage(1);
+        } catch (e) { toast(e.message, 'error'); }
+    }
+    async function _batchExempt(val) {
+        var ids = [];
+        var cbs = document.querySelectorAll('.rosterPayCb:checked');
+        for (var i = 0; i < cbs.length; i++) ids.push(parseInt(cbs[i].value, 10));
+        if (!ids.length) return toast('请先勾选花名册学生', 'error');
+        try {
+            await api('expected_payment', { exempt_ids: ids, exempt: val }, 'POST');
+            toast(val ? '已批量设为免缴' : '已批量设为应缴');
+            renderPayments();
+        } catch (e) { toast(e.message, 'error'); }
+    }
 
     async function setPerPerson() { var v = document.getElementById('perPersonAmt').value; if (!v || parseFloat(v) <= 0) return toast('请输入每人应缴金额', 'error'); try { await api('expected_payment', { per_person: parseFloat(v) }, 'POST'); renderPayments(); toast('已保存'); } catch (e) { toast(e.message, 'error'); } }
     async function toggleRosterExempt(id, ex) { try { await api('expected_payment', { exempt_id: id, exempt: ex ? 0 : 1 }, 'POST'); renderPayments(); } catch (e) { toast(e.message, 'error'); } }
@@ -598,7 +727,9 @@
     window.switchPage = switchPage; window.showAddTransaction = showAddTransaction;
     window.onTxTypeChange = onTxTypeChange; window.calcPerPerson = calcPerPerson; window.calcExpected = calcExpected;
     window.selectAllRoster = selectAllRoster; window.clearRoster = clearRoster;
-    window.saveTransaction = saveTransaction; window.uploadTxImage = uploadTxImage;
+    window.saveTransaction = saveTransaction; window.uploadTxImages = uploadTxImages; window.removeTxImage = removeTxImage;
+    window._createSemester = _createSemester; window._archiveSemester = _archiveSemester;
+    window._receipt = function (id) { window.open('api.php?action=receipt&id=' + id, '_blank', 'width=820,height=760'); };
     window.previewXlsx = previewXlsx; window.importXlsx = importXlsx;
     window.exportTransactions = exportTransactions; window.exportUnpaid = exportUnpaid;
     window.showAddStudent = showAddStudent; window.saveStudent = saveStudent;

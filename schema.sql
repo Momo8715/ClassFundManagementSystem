@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS `transactions` (
   `payer_ids`       TEXT DEFAULT NULL COMMENT '缴费学生ID(JSON数组或all)',
   `category`        VARCHAR(100) NOT NULL DEFAULT '其他',
   `image_path`      VARCHAR(500) DEFAULT NULL COMMENT '凭证图片路径',
+  `images`          TEXT DEFAULT NULL COMMENT '多图凭证(JSON数组)',
   `recorded_by`     INT NOT NULL,
   `deleted_at`      TIMESTAMP NULL DEFAULT NULL COMMENT '软删除时间',
   `created_at`      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -87,3 +88,14 @@ CREATE TABLE IF NOT EXISTS `class_roster` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uk_name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='班级学生名单';
+
+-- 学期管理
+CREATE TABLE IF NOT EXISTS `semesters` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `name`       VARCHAR(50) NOT NULL,
+  `start_date` DATE NOT NULL,
+  `end_date`   DATE NOT NULL,
+  `status`     ENUM('active','archived') NOT NULL DEFAULT 'active',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学期管理';

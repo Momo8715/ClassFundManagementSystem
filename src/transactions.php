@@ -5,6 +5,20 @@
  */
 
 // ==================== 收支记录 CRUD ====================
+
+/** 规范化图片列表：数组/JSON字符串 → JSON字符串（null 表示无图） */
+function normalizeImages($images): ?string {
+    if (is_string($images)) {
+        $decoded = json_decode($images, true);
+        if (is_array($decoded)) $images = $decoded;
+        else $images = $images !== '' ? [$images] : [];
+    }
+    if (!is_array($images)) $images = [];
+    $images = array_values(array_filter(array_map('trim', $images)));
+    if (empty($images)) return null;
+    return json_encode($images, JSON_UNESCAPED_UNICODE);
+}
+
 function handleTransactions(string $method) {
     requirePermission('viewTransactions');
 
@@ -96,6 +110,13 @@ function handleTransactionsPost() {
     $payerIds   = $input['payer_ids'] ?? null;
     $expAmt     = $input['expected_amount'] ?? null;
 
+    // 处理多图凭证
+    $imagesJson = normalizeImages($input['images'] ?? null);
+    if (!$imagePath && $imagesJson) {
+        $arr = json_decode($imagesJson, true);
+        if (!empty($arr)) $imagePath = $arr[0];
+    }
+
     if (!in_array($type, ['income', 'expense'])) jsonOutput(['error' => '类型无效'], 400);
     if ($amount <= 0) jsonOutput(['error' => '金额必须大于 0'], 400);
     if (!isValidDate($date)) jsonOutput(['error' => '日期格式无效'], 400);
@@ -126,7 +147,7 @@ function handleTransactionsPost() {
     }
 
     $user = currentUser();
-    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, date, description, payer_ids, category, image_path, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :d, :desc, :pids, :cat, :img, :rb)");
+    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, date, description, payer_ids, category, image_path, images, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :d, :desc, :pids, :cat, :img, :imgs, :rb)");
     $stmt->execute([
         ':t'    => $type,
         ':sc'   => $subCat ?: null,
@@ -138,6 +159,7 @@ function handleTransactionsPost() {
         ':pids' => $payerIds,
         ':cat'  => $cat,
         ':img'  => $imagePath ?: null,
+        ':imgs' => $imagesJson,
         ':rb'   => $user['id']
     ]);
     $newId = (int)db()->lastInsertId();
@@ -183,6 +205,17 @@ function handleTransactionsPut() {
         $newCat = trim($input['category'] ?? $old['category']);
         $newImg = array_key_exists('image_path', $input) ? (trim($input['image_path']) ?: null) : $old['image_path'];
 
+        // 处理多图凭证
+        if (array_key_exists('images', $input)) {
+            $newImages = normalizeImages($input['images']);
+        } else {
+            $newImages = $old['images'] ?? null;
+        }
+        if (!$newImg && $newImages) {
+            $arr = json_decode($newImages, true);
+            if (!empty($arr)) $newImg = $arr[0];
+        }
+
         // 处理 expected_amount（修复：之前 PUT 丢失此字段）
         if (array_key_exists('expected_amount', $input)) {
             $val = $input['expected_amount'];
@@ -212,7 +245,7 @@ function handleTransactionsPut() {
             $newPayerIds = $old['payer_ids'];
         }
 
-        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, date=:d, description=:desc, payer_ids=:pids, category=:cat, image_path=:img WHERE id=:id");
+        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, date=:d, description=:desc, payer_ids=:pids, category=:cat, image_path=:img, images=:imgs WHERE id=:id");
         $stmt->execute([
             ':t'    => $newType,
             ':sc'   => $newSubCat,
@@ -224,6 +257,7 @@ function handleTransactionsPut() {
             ':pids' => $newPayerIds,
             ':cat'  => $newCat,
             ':img'  => $newImg,
+            ':imgs' => $newImages,
             ':id'   => $id,
         ]);
 
@@ -258,6 +292,28 @@ function handleTransactionsDelete() {
     addLog($user['id'], $user['username'], 'delete_transaction', 'transaction', $id, $old);
 
     jsonOutput(['ok' => true]);
+}
+
+/** 批量软删除收支记录 */
+function handleTransactionsBatchDelete() {
+    requirePermission('deleteTransaction');
+    requireCsrfToken();
+
+    $input = jsonInput();
+    $ids = $input['ids'] ?? [];
+    if (is_string($ids)) $ids = json_decode($ids, true) ?: [];
+    $ids = array_values(array_filter(array_map('intval', (array)$ids), function ($v) { return $v > 0; }));
+    if (empty($ids)) jsonOutput(['error' => '请选择要删除的记录'], 400);
+
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = db()->prepare("UPDATE transactions SET deleted_at=NOW() WHERE id IN ($placeholders) AND deleted_at IS NULL");
+    $stmt->execute($ids);
+    $deleted = $stmt->rowCount();
+
+    $user = currentUser();
+    addLog($user['id'], $user['username'], 'batch_delete_transaction', 'transaction', null, ['ids' => $ids, 'count' => $deleted]);
+
+    jsonOutput(['ok' => true, 'deleted' => $deleted]);
 }
 
 // ==================== 仪表盘 ====================
