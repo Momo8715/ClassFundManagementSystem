@@ -33,15 +33,15 @@ require_once __DIR__ . '/src/upgrade.php';
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
-// 写操作仅允许 POST/PUT/DELETE，禁止通过 GET 触发（防止预取/缓存意外副作用）
-$writeActions = [
-    'transactions' => ['POST', 'PUT', 'DELETE'],
-    'users' => ['POST', 'PUT', 'DELETE'],
-    'roster' => ['POST', 'DELETE'],
-    'semesters' => ['POST'],
-    'recycle_bin' => ['PUT', 'DELETE'],
-    'expected_payment' => ['POST'],
-    'classInfo' => ['PUT'],
+// 每个 action 允许的 HTTP 方法（只读接口允许 GET；纯写操作仅允许 POST/PUT/DELETE）
+$actionMethods = [
+    'transactions' => ['GET', 'POST', 'PUT', 'DELETE'],
+    'users' => ['GET', 'POST', 'PUT', 'DELETE'],
+    'roster' => ['GET', 'POST', 'DELETE'],
+    'semesters' => ['GET', 'POST'],
+    'recycle_bin' => ['GET', 'PUT', 'DELETE'],
+    'expected_payment' => ['GET', 'POST'],
+    'classInfo' => ['GET', 'PUT'],
     'guest_login' => ['POST'],
     'logout' => ['POST'],
     'change_password' => ['POST'],
@@ -53,7 +53,7 @@ $writeActions = [
     'ban_user' => ['POST'],
     'do_upgrade' => ['POST'],
 ];
-if (isset($writeActions[$action]) && !in_array($method, $writeActions[$action], true)) {
+if (isset($actionMethods[$action]) && !in_array($method, $actionMethods[$action], true)) {
     jsonOutput(['error' => '不支持的方法'], 405);
 }
 
