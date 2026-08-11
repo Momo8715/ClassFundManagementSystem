@@ -770,4 +770,5 @@
     window.previewRosterXlsx = previewRosterXlsx; window.importRosterXlsx = importRosterXlsx;
     window.setPerPerson = setPerPerson; window.closeModal = closeModal; window.refreshUI = refreshUI;
     window.checkUpdate = checkUpdate; window.doUpgrade = doUpgrade; window.renderRecycle = renderRecycle; window.renderSecurity = renderSecurity; window.renderPayments = renderPayments;
+    window.renderReport = renderReport;
 })();
