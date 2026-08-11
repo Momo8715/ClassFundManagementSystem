@@ -446,3 +446,211 @@ function outputSimpleXlsx(string $filename, string $sheetName, array $headers, a
     unlink($tmpFile);
     return true;
 }
+
+// ==================== 带样式 xlsx 生成器（列宽/合并/边框/图表） ====================
+
+/**
+ * 单元格样式索引：
+ * 0 默认 | 1 标题(16pt加粗居中) | 2 副标题(10pt灰居中) | 3 分组标题(加粗浅灰底)
+ * 4 表头(加粗蓝底边框居中) | 5 数据(边框) | 6 加粗数据(边框) | 7 金额(边框右对齐)
+ */
+function xlsxStylesXml(): string {
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' .
+    '<fonts count="5">' .
+    '<font><sz val="11"/><name val="宋体"/></font>' .
+    '<font><b/><sz val="16"/><name val="宋体"/></font>' .
+    '<font><sz val="10"/><color rgb="FF808080"/><name val="宋体"/></font>' .
+    '<font><b/><sz val="11"/><name val="宋体"/></font>' .
+    '<font><b/><sz val="10"/><name val="宋体"/></font>' .
+    '</fonts>' .
+    '<fills count="4">' .
+    '<fill><patternFill patternType="none"/></fill>' .
+    '<fill><patternFill patternType="gray125"/></fill>' .
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFDCE6F1"/></patternFill></fill>' .
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F2"/></patternFill></fill>' .
+    '</fills>' .
+    '<borders count="2">' .
+    '<border><left/><right/><top/><bottom/><diagonal/></border>' .
+    '<border><left style="thin"><color rgb="FF808080"/></left><right style="thin"><color rgb="FF808080"/></right><top style="thin"><color rgb="FF808080"/></top><bottom style="thin"><color rgb="FF808080"/></bottom><diagonal/></border>' .
+    '</borders>' .
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' .
+    '<cellXfs count="8">' .
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' .
+    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment horizontal="center" vertical="center"/></xf>' .
+    '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment horizontal="center"/></xf>' .
+    '<xf numFmtId="0" fontId="3" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment horizontal="left"/></xf>' .
+    '<xf numFmtId="0" fontId="3" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center"/></xf>' .
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment vertical="center"/></xf>' .
+    '<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"><alignment vertical="center"/></xf>' .
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment horizontal="right" vertical="center"/></xf>' .
+    '</cellXfs>' .
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' .
+    '</styleSheet>';
+}
+
+/**
+ * 生成带样式的 xlsx 文件并输出下载。
+ *
+ * @param string $filename 下载文件名（不含扩展名）
+ * @param string $sheetName 工作表名
+ * @param array  $colWidths 列宽数组，如 [28, 18, 18, 22]
+ * @param array  $rows      行数组；每行元素为：
+ *                          - string：普通文本（默认样式）
+ *                          - ['v'=>文本, 's'=>样式索引, 'm'=>向右合并的额外列数]
+ * @param array|null $chart 图表配置（可选）：
+ *                          ['title'=>标题, 'from'=>[col,row], 'to'=>[col,row],
+ *                           'series'=>[['name'=>, 'catRef'=>, 'valRef'=>, 'cats'=>[], 'vals'=>[]], ...]]
+ */
+function outputStyledXlsx(string $filename, string $sheetName, array $colWidths, array $rows, ?array $chart = null): bool {
+    $tmpFile = tempnam(sys_get_temp_dir(), 'xlsx');
+    $zip = new ZipArchive();
+    if ($zip->open($tmpFile, ZipArchive::CREATE) !== true) return false;
+
+    // ---- 工作表 XML ----
+    $hasChart = $chart !== null;
+    $colsXml = '<cols>';
+    foreach ($colWidths as $i => $w) $colsXml .= '<col min="' . ($i + 1) . '" max="' . ($i + 1) . '" width="' . $w . '" customWidth="1"/>';
+    $colsXml .= '</cols>';
+
+    $rowsXml = '';
+    $merges = [];
+    foreach ($rows as $rIdx => $row) {
+        $rowNum = $rIdx + 1;
+        $rowsXml .= '<row r="' . $rowNum . '">';
+        $colIdx = 0;
+        foreach ($row as $cell) {
+            $colNum = $colIdx + 1;
+            $ref = chr(64 + $colNum) . $rowNum;
+            if (is_array($cell)) {
+                $val = (string)($cell['v'] ?? '');
+                $style = (int)($cell['s'] ?? 0);
+                $span = (int)($cell['m'] ?? 0);
+                if ($span > 0) {
+                    $endCol = chr(64 + $colNum + $span);
+                    $merges[] = $ref . ':' . $endCol . $rowNum;
+                }
+            } else {
+                $val = (string)$cell;
+                $style = 0;
+                $span = 0;
+            }
+            $val = htmlspecialchars($val, ENT_QUOTES, 'UTF-8');
+            $rowsXml .= '<c r="' . $ref . '" s="' . $style . '" t="inlineStr"><is><t xml:space="preserve">' . $val . '</t></is></c>';
+            $colIdx += 1 + $span;
+        }
+        $rowsXml .= '</row>';
+    }
+    $mergeXml = empty($merges) ? '' : '<mergeCells count="' . count($merges) . '">' . implode('', array_map(function ($m) { return '<mergeCell ref="' . $m . '"/>'; }, $merges)) . '</mergeCells>';
+
+    $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' .
+        $colsXml . '<sheetData>' . $rowsXml . '</sheetData>' . $mergeXml .
+        ($hasChart ? '<drawing r:id="rId1"/>' : '') .
+        '</worksheet>';
+
+    // ---- 图表 XML（柱状图） ----
+    $chartXml = '';
+    if ($hasChart) {
+        $serXml = '';
+        foreach ($chart['series'] as $si => $s) {
+            $cats = $s['cats'] ?? [];
+            $vals = $s['vals'] ?? [];
+            $catPts = '';
+            foreach ($cats as $ci => $cv) $catPts .= '<c:pt idx="' . $ci . '"><c:v>' . htmlspecialchars((string)$cv, ENT_XML1) . '</c:v></c:pt>';
+            $valPts = '';
+            foreach ($vals as $vi => $vv) $valPts .= '<c:pt idx="' . $vi . '"><c:v>' . $vv . '</c:v></c:pt>';
+            $serXml .= '<c:ser><c:idx val="' . $si . '"/><c:order val="' . $si . '"/>' .
+                '<c:tx><c:strRef><c:f>' . $sheetName . '!' . $s['nameRef'] . '</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>' . htmlspecialchars((string)$s['name'], ENT_XML1) . '</c:v></c:pt></c:strCache></c:strRef></c:tx>' .
+                '<c:cat><c:strRef><c:f>' . $sheetName . '!' . $s['catRef'] . '</c:f><c:strCache><c:ptCount val="' . count($cats) . '"/>' . $catPts . '</c:strCache></c:strRef></c:cat>' .
+                '<c:val><c:numRef><c:f>' . $sheetName . '!' . $s['valRef'] . '</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="' . count($vals) . '"/>' . $valPts . '</c:numCache></c:numRef></c:val>' .
+                '</c:ser>';
+        }
+        $chartXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+            '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' .
+            '<c:chart>' .
+            '<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="12" b="1"/></a:pPr><a:r><a:rPr lang="zh-CN" sz="12" b="1"/><a:t>' . htmlspecialchars((string)($chart['title'] ?? '图表'), ENT_XML1) . '</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>' .
+            '<c:autoTitleDeleted val="0"/>' .
+            '<c:plotArea><c:layout/>' .
+            '<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>' . $serXml .
+            '<c:axId val="123456789"/><c:axId val="987654321"/></c:barChart>' .
+            '<c:catAx><c:axId val="123456789"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:crossAx val="987654321"/></c:catAx>' .
+            '<c:valAx><c:axId val="987654321"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:crossAx val="123456789"/></c:valAx>' .
+            '</c:plotArea>' .
+            '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>' .
+            '<c:plotVisOnly val="1"/>' .
+            '</c:chart></c:chartSpace>';
+    }
+
+    // ---- 绘图 XML ----
+    $drawingXml = '';
+    if ($hasChart) {
+        $from = $chart['from'];
+        $to = $chart['to'];
+        $drawingXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+            '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' .
+            '<xdr:twoCellAnchor editAs="oneCell">' .
+            '<xdr:from><xdr:col>' . $from[0] . '</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>' . $from[1] . '</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>' .
+            '<xdr:to><xdr:col>' . $to[0] . '</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>' . $to[1] . '</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>' .
+            '<xdr:graphicFrame macro="">' .
+            '<xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Chart 1"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>' .
+            '<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>' .
+            '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">' .
+            '<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1"/>' .
+            '</a:graphicData></a:graphic>' .
+            '</xdr:graphicFrame><xdr:clientData/>' .
+            '</xdr:twoCellAnchor></xdr:wsDr>';
+    }
+
+    // ---- 打包 ----
+    $zip->addFromString('[Content_Types].xml',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' .
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' .
+        '<Default Extension="xml" ContentType="application/xml"/>' .
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' .
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' .
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' .
+        ($hasChart ? '<Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' : '') .
+        '</Types>');
+    $zip->addFromString('_rels/.rels',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' .
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' .
+        '</Relationships>');
+    $zip->addFromString('xl/workbook.xml',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' .
+        '<sheets><sheet name="' . htmlspecialchars($sheetName, ENT_QUOTES) . '" sheetId="1" r:id="rId1"/></sheets></workbook>');
+    $zip->addFromString('xl/_rels/workbook.xml.rels',
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' .
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' .
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' .
+        '</Relationships>');
+    $zip->addFromString('xl/worksheets/sheet1.xml', $sheetXml);
+    $zip->addFromString('xl/styles.xml', xlsxStylesXml());
+    if ($hasChart) {
+        $zip->addFromString('xl/worksheets/_rels/sheet1.xml.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' .
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>' .
+            '</Relationships>');
+        $zip->addFromString('xl/drawings/drawing1.xml', $drawingXml);
+        $zip->addFromString('xl/drawings/_rels/drawing1.xml.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' .
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' .
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>' .
+            '</Relationships>');
+        $zip->addFromString('xl/charts/chart1.xml', $chartXml);
+    }
+    $zip->close();
+
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $filename . '.xlsx"');
+    header('Content-Length: ' . filesize($tmpFile));
+    header('Cache-Control: no-cache');
+    readfile($tmpFile);
+    unlink($tmpFile);
+    return true;
+}
