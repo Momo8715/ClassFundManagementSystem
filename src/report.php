@@ -123,7 +123,7 @@ function handleReportSemester() {
     jsonOutput(buildReportData($_GET));
 }
 
-/** 导出学期报表为 xlsx（带样式/列宽/框线/图表，便于打印） */
+/** 导出学期报表为 xlsx（带样式/列宽/框线/明细/图表，A4竖版打印） */
 function handleExportReport() {
     requirePermission('viewTransactions');
 
@@ -134,48 +134,76 @@ function handleExportReport() {
     $nCat = count($d['by_category']);
     $nMon = count($d['by_month']);
 
+    // 期内收支明细（详细账目）
+    $detStmt = db()->prepare("SELECT t.date, t.type, t.amount, t.description, t.category, u.username AS recorder
+        FROM transactions t LEFT JOIN users u ON t.recorded_by=u.id
+        WHERE t.deleted_at IS NULL AND t.date BETWEEN :s AND :e ORDER BY t.date, t.id");
+    $detStmt->execute([':s' => $p['start'], ':e' => $p['end']]);
+    $details = $detStmt->fetchAll();
+    $nDet = count($details);
+
     // ---- 构建报表行（样式：1标题 2副标题 3分组 4表头 5数据 6加粗 7金额） ----
     $rows = [];
-    $rows[] = [['v' => $p['label'] . ' - 收支汇总报表', 's' => 1, 'm' => 3]];
-    $rows[] = [['v' => '统计区间：' . $p['start'] . ' ~ ' . $p['end'], 's' => 2, 'm' => 3]];
-    $rows[] = ['', '', '', ''];
+    $rows[] = [['v' => $p['label'] . ' - 收支汇总报表', 's' => 1, 'm' => 5]];
+    $rows[] = [['v' => '统计区间：' . $p['start'] . ' ~ ' . $p['end'] . '    生成时间：' . date('Y-m-d H:i'), 's' => 2, 'm' => 5]];
+    $rows[] = ['', '', '', '', '', ''];
 
-    $rows[] = ['期初余额', ['v' => number_format($s['begin_balance'], 2, '.', ''), 's' => 7], '元', ''];
-    $rows[] = ['总收入', ['v' => number_format($s['total_income'], 2, '.', ''), 's' => 7], $s['income_count'] . ' 笔', ''];
-    $rows[] = ['总支出', ['v' => number_format($s['total_expense'], 2, '.', ''), 's' => 7], $s['expense_count'] . ' 笔', ''];
-    $rows[] = ['期末结余', ['v' => number_format($s['balance'], 2, '.', ''), 's' => 6], $s['balance'] >= 0 ? '正常' : '超支', ''];
-    $rows[] = ['班费收缴', ['v' => '实收 ' . number_format($s['collected_amount'], 2, '.', '') . ' 元', 's' => 5], '应收 ' . number_format($s['expected_amount'], 2, '.', '') . ' 元', '收缴率 ' . $s['collect_rate'] . '%（' . $s['rounds'] . ' 轮）'];
+    $rows[] = ['期初余额', ['v' => number_format($s['begin_balance'], 2, '.', ''), 's' => 7], '元', '', '', ''];
+    $rows[] = ['总收入', ['v' => number_format($s['total_income'], 2, '.', ''), 's' => 7], '元', $s['income_count'] . ' 笔', '', ''];
+    $rows[] = ['总支出', ['v' => number_format($s['total_expense'], 2, '.', ''), 's' => 7], '元', $s['expense_count'] . ' 笔', '', ''];
+    $rows[] = ['期末结余', ['v' => number_format($s['balance'], 2, '.', ''), 's' => 6], '元', $s['balance'] >= 0 ? '正常' : '超支', '', ''];
+    $rows[] = ['班费收缴', ['v' => '实收 ' . number_format($s['collected_amount'], 2, '.', '') . ' 元', 's' => 5], '应收 ' . number_format($s['expected_amount'], 2, '.', '') . ' 元', '收缴率 ' . $s['collect_rate'] . '%（' . $s['rounds'] . ' 轮）', '', ''];
 
-    $rows[] = ['', '', '', ''];
-    $rows[] = [['v' => '一、分类明细', 's' => 3, 'm' => 3]];
-    $rows[] = [['v' => '分类', 's' => 4], ['v' => '金额（元）', 's' => 4], ['v' => '笔数', 's' => 4], ['v' => '类型', 's' => 4]];
+    $rows[] = ['', '', '', '', '', ''];
+    $rows[] = [['v' => '一、分类明细', 's' => 3, 'm' => 5]];
+    $rows[] = [['v' => '分类', 's' => 4], ['v' => '金额（元）', 's' => 4], ['v' => '笔数', 's' => 4], ['v' => '类型', 's' => 4], ['v' => '', 's' => 4], ['v' => '', 's' => 4]];
     if ($nCat > 0) {
         foreach ($d['by_category'] as $c) {
-            $rows[] = [$c['category'], ['v' => number_format($c['total'], 2, '.', ''), 's' => 7], ['v' => $c['cnt'], 's' => 5], $c['type'] === 'income' ? '收入' : '支出'];
+            $rows[] = [$c['category'], ['v' => number_format($c['total'], 2, '.', ''), 's' => 7], ['v' => $c['cnt'], 's' => 5], $c['type'] === 'income' ? '收入' : '支出', '', ''];
         }
     } else {
-        $rows[] = ['（本学期暂无收支记录）', '', '', ''];
+        $rows[] = ['（本学期暂无收支记录）', '', '', '', '', ''];
     }
 
-    $rows[] = ['', '', '', ''];
-    $rows[] = [['v' => '二、月度明细', 's' => 3, 'm' => 3]];
-    $rows[] = [['v' => '月份', 's' => 4], ['v' => '收入（元）', 's' => 4], ['v' => '支出（元）', 's' => 4], ['v' => '净额（元）', 's' => 4]];
+    $rows[] = ['', '', '', '', '', ''];
+    $rows[] = [['v' => '二、月度明细', 's' => 3, 'm' => 5]];
+    $rows[] = [['v' => '月份', 's' => 4], ['v' => '收入（元）', 's' => 4], ['v' => '支出（元）', 's' => 4], ['v' => '净额（元）', 's' => 4], ['v' => '', 's' => 4], ['v' => '', 's' => 4]];
     if ($nMon > 0) {
         foreach ($d['by_month'] as $m) {
-            $rows[] = [$m['month'], ['v' => number_format($m['income'], 2, '.', ''), 's' => 7], ['v' => number_format($m['expense'], 2, '.', ''), 's' => 7], ['v' => number_format($m['net'], 2, '.', ''), 's' => 6]];
+            $rows[] = [$m['month'], ['v' => number_format($m['income'], 2, '.', ''), 's' => 7], ['v' => number_format($m['expense'], 2, '.', ''), 's' => 7], ['v' => number_format($m['net'], 2, '.', ''), 's' => 6], '', ''];
         }
     } else {
-        $rows[] = ['（本学期暂无月度数据）', '', '', ''];
+        $rows[] = ['（本学期暂无月度数据）', '', '', '', '', ''];
+    }
+
+    $rows[] = ['', '', '', '', '', ''];
+    $rows[] = [['v' => '三、收支明细（共 ' . $nDet . ' 笔）', 's' => 3, 'm' => 5]];
+    $rows[] = [['v' => '日期', 's' => 4], ['v' => '类型', 's' => 4], ['v' => '金额（元）', 's' => 4], ['v' => '描述', 's' => 4], ['v' => '分类', 's' => 4], ['v' => '记录人', 's' => 4]];
+    if ($nDet > 0) {
+        foreach ($details as $tx) {
+            $rows[] = [
+                $tx['date'],
+                $tx['type'] === 'income' ? '收入' : '支出',
+                ['v' => number_format((float)$tx['amount'], 2, '.', ''), 's' => 7],
+                $tx['description'],
+                $tx['category'],
+                $tx['recorder'] ?? '',
+            ];
+        }
+    } else {
+        $rows[] = ['（本学期暂无收支记录）', '', '', '', '', ''];
     }
 
     // ---- 图表配置（月度收支柱状图） ----
     $chart = null;
     if ($nMon > 0) {
-        // 行号（1-based）：分类数据 n 行后为月度区
-        $monHeaderRow = 11 + max($nCat, 1);      // 月度表头行
-        $monDataRow   = $monHeaderRow + 1;        // 月度数据首行
-        $monEndRow    = $monDataRow + $nMon - 1;  // 月度数据末行
-        $chartTitleRow = $monEndRow + 2;          // 图表分组标题行
+        // 行号（1-based）：分类区 n 行、月度区 n 行、明细区 n 行之后为图表
+        $monHeaderRow = 14 + max($nCat, 1);       // 月度表头行
+        $monDataRow   = $monHeaderRow + 1;         // 月度数据首行
+        $monEndRow    = $monDataRow + $nMon - 1;
+        $chartTitleRow = $monEndRow + 2 + 3 + max($nDet, 1) + 1; // 明细区(空1+分组1+表头1+数据n+空1) 之后
+        // 更精确：明细分组行 = $monEndRow+2（空）→ 明细表头 = +3 → 明细数据到 +3+max(nDet,1) → 图表分组 = +3+max(nDet,1)+1
+        $chartTitleRow = $monEndRow + 2 + 3 + max($nDet, 1) + 1;
 
         $chart = [
             'title'  => '月度收支对比',
@@ -200,12 +228,11 @@ function handleExportReport() {
                 ],
             ],
         ];
-        // 图表分组标题行
-        $rows[] = ['', '', '', ''];
-        $rows[] = [['v' => '三、月度收支图表', 's' => 3, 'm' => 3]];
+        $rows[] = ['', '', '', '', '', ''];
+        $rows[] = [['v' => '四、月度收支图表', 's' => 3, 'm' => 5]];
     }
 
-    outputStyledXlsx('学期报表_' . date('Ymd_His'), '学期报表', [30, 18, 18, 22], $rows, $chart);
+    outputStyledXlsx('学期报表_' . date('Ymd_His'), '学期报表', [12, 8, 12, 32, 10, 10], $rows, $chart);
     exit;
 }
 

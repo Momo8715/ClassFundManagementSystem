@@ -547,6 +547,8 @@ function outputStyledXlsx(string $filename, string $sheetName, array $colWidths,
         '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' .
         $colsXml . '<sheetData>' . $rowsXml . '</sheetData>' . $mergeXml .
         ($hasChart ? '<drawing r:id="rId1"/>' : '') .
+        '<pageMargins left="0.5" right="0.5" top="0.7" bottom="0.7" header="0.3" footer="0.3"/>' .
+        '<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="0"/>' .
         '</worksheet>';
 
     // ---- 图表 XML（柱状图） ----
