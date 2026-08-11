@@ -93,7 +93,7 @@ function doUpgrade() {
     }
 
     $rootDir = realpath(__DIR__ . '/..');
-    $exclude = ['uploads', '.reasonix', 'backup_', '.git'];
+    $exclude = ['uploads', '.reasonix', 'backup_', '.git', 'db_config.json'];
     $backupCount = backupFiles($rootDir, $backupDir, $exclude);
 
     // 解压覆盖

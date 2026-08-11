@@ -51,7 +51,8 @@ function handleUsersGet() {
         }
         jsonOutput(['users' => $users]);
     } catch (\Throwable $e) {
-        jsonOutput(['error' => 'GET users: ' . $e->getMessage() . ' | file: ' . $e->getFile() . ':' . $e->getLine()], 500);
+        error_log('[班费系统] GET users 异常: ' . $e->getMessage());
+        jsonOutput(['error' => '查询失败，请稍后重试'], 500);
     }
 }
 
@@ -214,6 +215,7 @@ function handleClassInfo(string $method) {
     startSession();
 
     if ($method === 'GET') {
+        requireLogin();
         $info = [
             'name'     => $_SESSION['class_name'] ?? '',
             'semester' => $_SESSION['class_semester'] ?? '',

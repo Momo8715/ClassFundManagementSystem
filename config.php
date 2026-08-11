@@ -276,7 +276,7 @@ function startSession() {
         session_set_cookie_params([
             'lifetime' => SESSION_TIMEOUT,
             'path'     => '/',
-            'secure'   => false,
+            'secure'   => !empty($_SERVER['HTTPS']) || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https'),
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
@@ -318,6 +318,23 @@ function requireLogin() {
         http_response_code(401);
         echo json_encode(['error' => '请先登录']);
         exit;
+    }
+    // 封禁检查：被封禁用户的已有会话立即失效（防止封禁形同虚设）
+    $uid = (int)($_SESSION['user_id'] ?? 0);
+    if ($uid > 0) {
+        try {
+            $stmt = db()->prepare("SELECT banned FROM users WHERE id=:id");
+            $stmt->execute([':id' => $uid]);
+            if ((int)$stmt->fetchColumn() === 1) {
+                $_SESSION = [];
+                session_destroy();
+                http_response_code(403);
+                echo json_encode(['error' => '账号已被管理员限制登录']);
+                exit;
+            }
+        } catch (\Exception $e) {
+            // 数据库异常时不阻断请求
+        }
     }
 }
 
@@ -363,9 +380,10 @@ function jsonOutput($data, int $code = 200) {
 
 /** 获取客户端真实IPv4和IPv6 */
 function getClientIPs(): array {
-    // 收集所有可能的 IP 来源
+    // 只信任 Cloudflare 的 CF-Connecting-IP（由 CF 覆盖，客户端无法伪造）与 REMOTE_ADDR，
+    // 不再信任 X-Forwarded-For / X-Real-IP / Client-IP 等可被直接伪造的头，防止审计污染。
     $sources = [];
-    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'HTTP_CLIENT_IP', 'REMOTE_ADDR'] as $key) {
+    foreach (['HTTP_CF_CONNECTING_IP', 'REMOTE_ADDR'] as $key) {
         $val = $_SERVER[$key] ?? '';
         if ($val) {
             foreach (explode(',', $val) as $ip) {

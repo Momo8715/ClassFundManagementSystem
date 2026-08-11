@@ -52,8 +52,17 @@ function validateCsrfToken(string $token): bool {
 
 /** 要求 CSRF 令牌，无效则拒绝请求 */
 function requireCsrfToken(): void {
-    $input = jsonInput();
-    $token = $input['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+    // 只从请求体或请求头读取 token，不接受 URL 参数（防止 token 经 Referer/日志泄露）
+    $token = $_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+    if (empty($token)) {
+        // PUT/DELETE 等请求体需手动解析
+        $raw = file_get_contents('php://input');
+        if ($raw !== false && $raw !== '') {
+            $data = json_decode($raw, true);
+            if (!is_array($data)) { parse_str($raw, $data); }
+            $token = $data['csrf_token'] ?? '';
+        }
+    }
     if (!validateCsrfToken($token)) {
         http_response_code(403);
         echo json_encode(['error' => 'CSRF 令牌无效或缺失，请刷新页面后重试'], JSON_UNESCAPED_UNICODE);

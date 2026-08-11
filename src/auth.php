@@ -69,6 +69,8 @@ function handleLogin() {
 function handleGuestLogin() {
     $input = jsonInput();
     startSession();
+    // 防止会话固定攻击：访客登录同样重新生成 session ID
+    regenerateSession();
 
     $_SESSION['user_id']   = 0;
     $_SESSION['username']  = '同学（访客）';
@@ -95,6 +97,7 @@ function handleGuestLogin() {
 // ==================== 注销 ====================
 function handleLogout() {
     startSession();
+    requireCsrfToken();
     if (isset($_SESSION['user_id'])) {
         addLog($_SESSION['user_id'], $_SESSION['username'], 'logout', 'system', null, '用户登出');
     }

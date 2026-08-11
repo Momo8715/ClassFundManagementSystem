@@ -6,8 +6,8 @@
  */
 require_once __DIR__ . '/config.php';
 
-// 已安装保护：db_config.json 存在且数据库可用时，禁止再次执行安装流程
-if (file_exists(__DIR__ . '/db_config.json') && isDbInstalled()) {
+// 已安装保护：db_config.json 存在即禁止重装（不依赖数据库可用性，防止被未认证重装接管）
+if (file_exists(__DIR__ . '/db_config.json')) {
     header('Location: index.php');
     exit;
 }

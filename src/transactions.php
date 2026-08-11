@@ -46,7 +46,7 @@ function handleTransactionsGet() {
     $month  = $_GET['month'] ?? '';
     $search = trim($_GET['search'] ?? '');
     $page   = max(1, intval($_GET['page'] ?? 1));
-    $perPage = min(100, max(10, intval($_GET['per_page'] ?? 50)));
+    $perPage = min(1000, max(10, intval($_GET['per_page'] ?? 50)));
 
     $sql = "SELECT t.*, u.username as recorder_name FROM transactions t LEFT JOIN users u ON t.recorded_by=u.id WHERE t.deleted_at IS NULL";
     $countSql = "SELECT COUNT(*) FROM transactions t WHERE t.deleted_at IS NULL";

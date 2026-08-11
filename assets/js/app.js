@@ -498,7 +498,7 @@
         document.getElementById('txType').value = 'income';
         onTxTypeChange();
         document.getElementById('txAmount').value = '';
-        document.getElementById('txDate').value = new Date().toISOString().slice(0, 10);
+        document.getElementById('txDate').value = (function () { var n = new Date(); return n.getFullYear() + '-' + (n.getMonth() < 9 ? '0' : '') + (n.getMonth() + 1) + '-' + (n.getDate() < 10 ? '0' : '') + n.getDate(); })();
         document.getElementById('txDesc').value = '';
         document.getElementById('txCategory').value = '班费';
         document.getElementById('txSourceInfo').value = '';
@@ -541,6 +541,13 @@
             var pids = t.payer_ids;
             if (pids === 'all') { document.querySelectorAll('.rosterCb').forEach(function (cb) { cb.checked = true; }); }
             else if (pids) { var arr = typeof pids === 'string' ? JSON.parse(pids) : pids; if (Array.isArray(arr)) { document.querySelectorAll('.rosterCb').forEach(function (cb) { cb.checked = arr.includes(parseInt(cb.value)); }); } }
+            // 回填每人应缴
+            var pp = '';
+            if (pids && pids !== 'all') {
+                var arr2 = typeof pids === 'string' ? JSON.parse(pids) : pids;
+                if (Array.isArray(arr2) && arr2.length) pp = (Number(t.amount) / arr2.length).toFixed(2);
+            }
+            document.getElementById('txPerPerson').value = pp;
         }
         openModal('modalTx');
     }
@@ -785,4 +792,7 @@
     window.checkUpdate = checkUpdate; window.doUpgrade = doUpgrade; window.renderRecycle = renderRecycle; window.renderSecurity = renderSecurity; window.renderPayments = renderPayments;
     window.renderReport = renderReport;
     window.downloadReport = downloadReport;
+    window._toggleAllTx = _toggleAllTx; window._toggleAllRoster = _toggleAllRoster;
+    window._batchDeleteTx = _batchDeleteTx; window._batchExempt = _batchExempt;
+    window.exportLogsFiltered = exportLogsFiltered;
 })();

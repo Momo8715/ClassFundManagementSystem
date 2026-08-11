@@ -33,6 +33,30 @@ require_once __DIR__ . '/src/upgrade.php';
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
+// 写操作仅允许 POST/PUT/DELETE，禁止通过 GET 触发（防止预取/缓存意外副作用）
+$writeActions = [
+    'transactions' => ['POST', 'PUT', 'DELETE'],
+    'users' => ['POST', 'PUT', 'DELETE'],
+    'roster' => ['POST', 'DELETE'],
+    'semesters' => ['POST'],
+    'recycle_bin' => ['PUT', 'DELETE'],
+    'expected_payment' => ['POST'],
+    'classInfo' => ['PUT'],
+    'guest_login' => ['POST'],
+    'logout' => ['POST'],
+    'change_password' => ['POST'],
+    'transactions_batch' => ['POST'],
+    'import' => ['POST'],
+    'upload_image' => ['POST'],
+    'upload_xlsx' => ['POST'],
+    'roster_xlsx' => ['POST'],
+    'ban_user' => ['POST'],
+    'do_upgrade' => ['POST'],
+];
+if (isset($writeActions[$action]) && !in_array($method, $writeActions[$action], true)) {
+    jsonOutput(['error' => '不支持的方法'], 405);
+}
+
 // 路由分发
 switch ($action) {
     // ========== 认证 ==========

@@ -49,7 +49,7 @@ function handleImport() {
     } catch (\Exception $e) {
         db()->rollBack();
         securityLog('import_error', ['error' => $e->getMessage()]);
-        jsonOutput(['error' => '导入失败：' . $e->getMessage()], 500);
+        jsonOutput(['error' => '导入失败，请检查数据格式后重试'], 500);
     }
 
     addLog($user['id'], $user['username'], 'import', 'transaction', null, [
@@ -225,7 +225,7 @@ function handleUploadXlsx() {
             db()->commit();
         } catch (\Exception $e) {
             db()->rollBack();
-            jsonOutput(['error' => '导入失败：' . $e->getMessage()], 500);
+            jsonOutput(['error' => '导入失败，请检查数据格式后重试'], 500);
         }
         addLog($user['id'], $user['username'], 'import_xlsx', 'transaction', null, ['count' => $count]);
         jsonOutput(['ok' => true, 'imported' => $count, 'preview' => $rows]);
