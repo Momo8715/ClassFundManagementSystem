@@ -153,10 +153,18 @@ function validateImageUpload(array $file): ?string {
         return '图片不能超过 5MB';
     }
 
-    // 通过文件内容检测真实类型（而非信任扩展名）
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mime = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
+    // 通过文件内容检测真实类型（而非信任扩展名）；fileinfo 扩展缺失时回退 getimagesize
+    $mime = '';
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+    }
+    if (empty($mime)) {
+        $info = @getimagesize($file['tmp_name']);
+        if ($info === false) return '文件不是有效的图片';
+        $mime = $info['mime'];
+    }
 
     $allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
     if (!in_array($mime, $allowedMimes, true)) {

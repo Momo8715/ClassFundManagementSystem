@@ -77,10 +77,17 @@ function handleUploadImage() {
         jsonOutput(['error' => $error], 400);
     }
 
-    // 通过 MIME 确定安全扩展名
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mime = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
+    // 通过 MIME 确定安全扩展名（fileinfo 缺失时回退 getimagesize）
+    $mime = '';
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+    }
+    if (empty($mime)) {
+        $info = @getimagesize($file['tmp_name']);
+        if ($info !== false) $mime = $info['mime'];
+    }
     $ext = safeExtension($mime);
 
     $uploadDir = __DIR__ . '/../uploads/';
