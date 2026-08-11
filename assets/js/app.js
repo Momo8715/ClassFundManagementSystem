@@ -5,6 +5,12 @@
 (function () {
     'use strict';
 
+    // 兼容 Cloudflare Rocket Loader：其会将内联 onclick 改写为
+    // "if (!window.__cfRLUnblockHandlers) return false; xxx()"。
+    // 当 Rocket Loader 初始化失败时该标记缺失，导致所有按钮点击失效。
+    // 此处主动声明已解锁，保证内联事件处理器始终执行。
+    window.__cfRLUnblockHandlers = true;
+
     // ========== 常量 ==========
     var API = 'api.php';
     var ROLE_LABELS = { head_teacher: '班主任', admin: '管理员', monitor: '班长', vice_monitor: '副班长', finance: '财务委员', student: '同学' };
