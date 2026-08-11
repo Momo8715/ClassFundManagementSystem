@@ -3,7 +3,7 @@ chcp 65001 >nul
 rem ============================================
 rem 一键部署入口（Windows）
 rem 实际执行 deploy.sh（需要 Git Bash，随 Git for Windows 自带）
-rem 用法: deploy.bat v1.2（新功能）  或  deploy.bat v1.1.1（bug修复）
+rem 用法: deploy.bat v2.0（大版本）  v1.4（新功能）  v1.4.1（bug修复/优化）
 rem ============================================
 cd /d "%~dp0"
 
@@ -17,7 +17,7 @@ if errorlevel 1 (
 
 if "%~1"=="" (
     echo [用法] deploy.bat ^<版本号^>
-    echo [示例] deploy.bat v1.2 ^<新功能^>   或  deploy.bat v1.1.1 ^<bug修复^>
+    echo [示例] deploy.bat v2.0 ^<大版本^>   v1.4 ^<新功能^>   v1.4.1 ^<bug修复/优化^>
     pause
     exit /b 1
 )
