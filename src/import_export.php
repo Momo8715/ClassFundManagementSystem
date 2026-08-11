@@ -22,12 +22,12 @@ function handleImport() {
     try {
         foreach ($records as $i => $r) {
             $type = ($r['type'] ?? '') === 'expense' ? 'expense' : 'income';
-            $sc   = trim($r['sub_category'] ?? '');
-            $si   = trim($r['source_info'] ?? '');
+            $sc   = mb_substr(trim($r['sub_category'] ?? ''), 0, 50);
+            $si   = mb_substr(trim($r['source_info'] ?? ''), 0, 500);
             $amt  = sanitizeAmount($r['amount'] ?? 0);
             $date = $r['date'] ?? '';
-            $desc = trim($r['description'] ?? '');
-            $cat  = trim($r['category'] ?? ($type === 'income' ? '其他收入' : '其他支出'));
+            $desc = mb_substr(trim($r['description'] ?? ''), 0, 500);
+            $cat  = mb_substr(trim($r['category'] ?? ($type === 'income' ? '其他收入' : '其他支出')), 0, 100);
 
             if ($amt <= 0 || !isValidDate($date)) {
                 $errors[] = "第 " . ($i + 1) . " 行数据无效";

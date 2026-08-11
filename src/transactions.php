@@ -100,13 +100,13 @@ function handleTransactionsPost() {
 
     $input = jsonInput();
     $type       = $input['type'] ?? '';
-    $subCat     = trim($input['sub_category'] ?? '');
-    $sourceInfo = trim($input['source_info'] ?? '');
+    $subCat     = mb_substr(trim($input['sub_category'] ?? ''), 0, 50);
+    $sourceInfo = mb_substr(trim($input['source_info'] ?? ''), 0, 500);
     $amount     = sanitizeAmount($input['amount'] ?? 0);
     $date       = $input['date'] ?? '';
-    $desc       = trim($input['description'] ?? '');
-    $cat        = trim($input['category'] ?? '其他');
-    $imagePath  = trim($input['image_path'] ?? '');
+    $desc       = mb_substr(trim($input['description'] ?? ''), 0, 500);
+    $cat        = mb_substr(trim($input['category'] ?? '其他'), 0, 100);
+    $imagePath  = mb_substr(trim($input['image_path'] ?? ''), 0, 500);
     $payerIds   = $input['payer_ids'] ?? null;
     $expAmt     = $input['expected_amount'] ?? null;
 
@@ -197,13 +197,13 @@ function handleTransactionsPut() {
         $newAmount = isset($input['amount']) ? sanitizeAmount($input['amount']) : $old['amount'];
         if ($newAmount <= 0) jsonOutput(['error' => '金额必须大于 0'], 400);
 
-        $newDesc = isset($input['description']) ? trim($input['description']) : $old['description'];
+        $newDesc = isset($input['description']) ? mb_substr(trim($input['description']), 0, 500) : $old['description'];
         if (empty($newDesc)) jsonOutput(['error' => '请填写描述'], 400);
 
-        $newSubCat = array_key_exists('sub_category', $input) ? (trim($input['sub_category']) ?: null) : $old['sub_category'];
-        $newSrcInfo = array_key_exists('source_info', $input) ? (trim($input['source_info']) ?: null) : $old['source_info'];
-        $newCat = trim($input['category'] ?? $old['category']);
-        $newImg = array_key_exists('image_path', $input) ? (trim($input['image_path']) ?: null) : $old['image_path'];
+        $newSubCat = array_key_exists('sub_category', $input) ? (mb_substr(trim($input['sub_category']), 0, 50) ?: null) : $old['sub_category'];
+        $newSrcInfo = array_key_exists('source_info', $input) ? (mb_substr(trim($input['source_info']), 0, 500) ?: null) : $old['source_info'];
+        $newCat = mb_substr(trim($input['category'] ?? $old['category']), 0, 100);
+        $newImg = array_key_exists('image_path', $input) ? (mb_substr(trim($input['image_path']), 0, 500) ?: null) : $old['image_path'];
 
         // 处理多图凭证
         if (array_key_exists('images', $input)) {
@@ -267,7 +267,7 @@ function handleTransactionsPut() {
         jsonOutput(['ok' => true]);
     } catch (\Exception $e) {
         securityLog('update_transaction_error', ['id' => $id ?? 0, 'error' => $e->getMessage()]);
-        jsonOutput(['error' => '保存失败：' . $e->getMessage()], 500);
+        jsonOutput(['error' => '保存失败，请稍后重试或联系管理员'], 500);
     }
 }
 

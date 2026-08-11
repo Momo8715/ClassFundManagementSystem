@@ -80,7 +80,10 @@ function rateLimit(string $action, int $maxAttempts = 10, int $windowSeconds = 6
     $raw = stream_get_contents($fp);
     if ($raw !== false && $raw !== '') {
         $decoded = json_decode($raw, true);
-        if ($decoded) $data = $decoded;
+        // 校验结构，防止损坏/异常数据导致错误
+        if (is_array($decoded) && isset($decoded['attempts']) && isset($decoded['reset_at'])) {
+            $data = $decoded;
+        }
     }
 
     if ($now > $data['reset_at']) {

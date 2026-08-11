@@ -70,6 +70,12 @@ function handleUsersPost() {
 
     if (empty($username)) jsonOutput(['error' => '请输入姓名'], 400);
     if (mb_strlen($username) > 50) jsonOutput(['error' => '姓名不能超过 50 个字符'], 400);
+    // 防止创建空密码账户
+    if (strlen($password) < 4) jsonOutput(['error' => '密码至少 4 位'], 400);
+
+    // 角色白名单过滤，剔除未知角色
+    $roles = array_values(array_intersect($roles, ['head_teacher', 'admin', 'monitor', 'vice_monitor', 'finance', 'student']));
+    if (empty($roles)) $roles = ['student'];
 
     // 非管理员不能创建管理员角色
     if (!hasPermission('manageAllAccounts')) {
@@ -105,24 +111,41 @@ function handleUsersPut() {
     $id       = intval($_GET['id'] ?? $input['id'] ?? 0);
     $username = trim($input['username'] ?? '');
     $password = $input['password'] ?? $input['pwd'] ?? null;
-    $roles    = ($input['roles'] !== null) ? normalizeRoles($input['roles']) : null;
+    // 仅当显式提供了 roles 字段时才更新角色，否则保留原值（避免误清空）
+    $hasRoles = array_key_exists('roles', $input) && $input['roles'] !== null && $input['roles'] !== '';
+    $roles    = $hasRoles ? normalizeRoles($input['roles']) : null;
+    if ($hasRoles) {
+        // 角色白名单过滤，剔除未知角色
+        $roles = array_values(array_intersect($roles, ['head_teacher', 'admin', 'monitor', 'vice_monitor', 'finance', 'student']));
+        if (empty($roles)) $roles = ['student'];
+    }
 
     if ($id <= 0 || empty($username)) jsonOutput(['error' => '无效参数'], 400);
     if (mb_strlen($username) > 50) jsonOutput(['error' => '姓名不能超过 50 个字符'], 400);
 
     // 不能降级自己的管理员权限
-    if ($id == currentUser()['id'] && $roles && !in_array('admin', $roles)) {
+    if ($id == currentUser()['id'] && $hasRoles && !in_array('admin', $roles)) {
         jsonOutput(['error' => '不能移除自己的管理员权限'], 400);
     }
 
     if ($password && strlen($password) > 0) {
         if (strlen($password) < 4) jsonOutput(['error' => '密码至少 4 位'], 400);
         $hash = password_hash($password, PASSWORD_BCRYPT);
-        $stmt = db()->prepare("UPDATE users SET username=:u, password=:p, roles=:r WHERE id=:id");
-        $stmt->execute([':u' => $username, ':p' => $hash, ':r' => json_encode($roles), ':id' => $id]);
+        if ($hasRoles) {
+            $stmt = db()->prepare("UPDATE users SET username=:u, password=:p, roles=:r WHERE id=:id");
+            $stmt->execute([':u' => $username, ':p' => $hash, ':r' => json_encode($roles), ':id' => $id]);
+        } else {
+            $stmt = db()->prepare("UPDATE users SET username=:u, password=:p WHERE id=:id");
+            $stmt->execute([':u' => $username, ':p' => $hash, ':id' => $id]);
+        }
     } else {
-        $stmt = db()->prepare("UPDATE users SET username=:u, roles=:r WHERE id=:id");
-        $stmt->execute([':u' => $username, ':r' => json_encode($roles), ':id' => $id]);
+        if ($hasRoles) {
+            $stmt = db()->prepare("UPDATE users SET username=:u, roles=:r WHERE id=:id");
+            $stmt->execute([':u' => $username, ':r' => json_encode($roles), ':id' => $id]);
+        } else {
+            $stmt = db()->prepare("UPDATE users SET username=:u WHERE id=:id");
+            $stmt->execute([':u' => $username, ':id' => $id]);
+        }
     }
 
     $user = currentUser();

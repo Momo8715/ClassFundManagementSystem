@@ -8,6 +8,8 @@ function handleReportSemester() {
     requirePermission('viewTransactions');
 
     $year = intval($_GET['year'] ?? date('Y'));
+    // 限制年份合理范围，防止非法值产生无效日期
+    if ($year < 2000 || $year > 2100) $year = (int)date('Y');
     $semester = in_array($_GET['semester'] ?? '', ['spring', 'autumn']) ? $_GET['semester'] : 'spring';
 
     // 学期默认日期范围（可被自定义 start/end 覆盖）

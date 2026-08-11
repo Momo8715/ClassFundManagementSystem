@@ -28,6 +28,7 @@ function handleRoster(string $method) {
             $stmt = db()->prepare("INSERT IGNORE INTO class_roster (name) VALUES (:n)");
             $count = 0;
             foreach ($names as $n) {
+                if (!is_string($n)) continue; // 跳过非字符串元素，防止 trim() 报错
                 $n = trim($n);
                 if ($n && mb_strlen($n) <= 50) {
                     $stmt->execute([':n' => $n]);

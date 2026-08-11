@@ -68,6 +68,11 @@ function handleRecycleBin(string $method) {
             $id = intval($_GET['id'] ?? $input['id'] ?? 0);
             if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
 
+            // 仅允许恢复已软删除（在回收站中）的记录
+            $chk = db()->prepare("SELECT id FROM transactions WHERE id=:id AND deleted_at IS NOT NULL");
+            $chk->execute([':id' => $id]);
+            if (!$chk->fetch()) jsonOutput(['error' => '记录不存在或不在回收站中'], 404);
+
             db()->prepare("UPDATE transactions SET deleted_at=NULL WHERE id=:id")
                 ->execute([':id' => $id]);
 
@@ -82,9 +87,10 @@ function handleRecycleBin(string $method) {
             $id = intval($_GET['id'] ?? $input['id'] ?? 0);
             if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
 
-            $oldStmt = db()->prepare("SELECT * FROM transactions WHERE id=:id");
+            $oldStmt = db()->prepare("SELECT * FROM transactions WHERE id=:id AND deleted_at IS NOT NULL");
             $oldStmt->execute([':id' => $id]);
             $old = $oldStmt->fetch();
+            if (!$old) jsonOutput(['error' => '记录不存在或不在回收站中'], 404);
 
             db()->prepare("DELETE FROM transactions WHERE id=:id")
                 ->execute([':id' => $id]);
