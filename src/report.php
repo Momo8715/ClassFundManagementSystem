@@ -7,25 +7,40 @@
 function handleReportSemester() {
     requirePermission('viewTransactions');
 
-    $year = intval($_GET['year'] ?? date('Y'));
-    // 限制年份合理范围，防止非法值产生无效日期
-    if ($year < 2000 || $year > 2100) $year = (int)date('Y');
-    $semester = in_array($_GET['semester'] ?? '', ['spring', 'autumn']) ? $_GET['semester'] : 'spring';
-
-    // 学期默认日期范围（可被自定义 start/end 覆盖）
-    if ($semester === 'autumn') {
-        $start = "{$year}-09-01";
-        $end = ($year + 1) . '-02-28';
+    // 优先使用用户自定义学期（semesters 表），保证报表与学期管理数据一致
+    $sid = intval($_GET['semester_id'] ?? 0);
+    if ($sid > 0) {
+        $stmt = db()->prepare("SELECT * FROM semesters WHERE id=:id");
+        $stmt->execute([':id' => $sid]);
+        $sem = $stmt->fetch();
+        if (!$sem) jsonOutput(['error' => '学期不存在'], 404);
+        $start = $sem['start_date'];
+        $end = $sem['end_date'];
+        $year = (int)substr($start, 0, 4);
+        $semester = 'custom';
+        $label = $sem['name'];
+        $custom = true;
     } else {
-        $start = "{$year}-03-01";
-        $end = "{$year}-08-31";
-    }
-    if (!empty($_GET['start']) && isValidDate($_GET['start'])) $start = $_GET['start'];
-    if (!empty($_GET['end']) && isValidDate($_GET['end'])) $end = $_GET['end'];
+        // 回退：内置固定学期范围（可被自定义 start/end 覆盖）
+        $year = intval($_GET['year'] ?? date('Y'));
+        // 限制年份合理范围，防止非法值产生无效日期
+        if ($year < 2000 || $year > 2100) $year = (int)date('Y');
+        $semester = in_array($_GET['semester'] ?? '', ['spring', 'autumn']) ? $_GET['semester'] : 'spring';
 
-    $custom = !empty($_GET['start']) || !empty($_GET['end']);
-    $label = $semester === 'autumn' ? "{$year} 秋季学期" : "{$year} 春季学期";
-    if ($custom) $label = "{$start} ~ {$end}";
+        if ($semester === 'autumn') {
+            $start = "{$year}-09-01";
+            $end = ($year + 1) . '-02-28';
+        } else {
+            $start = "{$year}-03-01";
+            $end = "{$year}-08-31";
+        }
+        if (!empty($_GET['start']) && isValidDate($_GET['start'])) $start = $_GET['start'];
+        if (!empty($_GET['end']) && isValidDate($_GET['end'])) $end = $_GET['end'];
+
+        $custom = !empty($_GET['start']) || !empty($_GET['end']);
+        $label = $semester === 'autumn' ? "{$year} 秋季学期" : "{$year} 春季学期";
+        if ($custom) $label = "{$start} ~ {$end}";
+    }
 
     // 期初余额（学期开始前累计净额）
     $begin = db()->prepare("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE -amount END),0)

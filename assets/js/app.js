@@ -331,17 +331,44 @@
     async function renderReport() {
         try {
             var ySel = document.getElementById('reportYear');
-            if (ySel.options.length === 0) {
-                var cy = new Date().getFullYear();
-                for (var i = 0; i < 6; i++) {
-                    var o = document.createElement('option');
-                    o.value = String(cy - i);
-                    o.textContent = (cy - i) + ' 年';
-                    ySel.appendChild(o);
-                }
-                ySel.value = String(cy);
+            var sSel = document.getElementById('reportSemester');
+            // 首次进入：尝试加载用户自定义学期作为选项（保证与学期管理数据一致）
+            if (!window._semLoaded) {
+                window._semLoaded = true;
+                try {
+                    var sd = await api('semesters');
+                    var sems = sd.semesters || [];
+                    if (sems.length) {
+                        sems.forEach(function (s) {
+                            var o = document.createElement('option');
+                            o.value = 'id:' + s.id;
+                            o.textContent = s.name + '（' + s.start_date + ' ~ ' + s.end_date + '）' + (s.status === 'active' ? ' · 进行中' : ' · 已归档');
+                            sSel.appendChild(o);
+                        });
+                        // 默认选中进行中的学期
+                        var active = sems.filter(function (x) { return x.status === 'active'; });
+                        if (active.length) sSel.value = 'id:' + active[0].id;
+                    }
+                } catch (e) {}
             }
-            var p = { year: ySel.value, semester: document.getElementById('reportSemester').value };
+            var selVal = sSel.value;
+            var p = {};
+            if (selVal.indexOf('id:') === 0) {
+                p.semester_id = selVal.substring(3);
+            } else {
+                if (ySel.options.length === 0) {
+                    var cy = new Date().getFullYear();
+                    for (var i = 0; i < 6; i++) {
+                        var o = document.createElement('option');
+                        o.value = String(cy - i);
+                        o.textContent = (cy - i) + ' 年';
+                        ySel.appendChild(o);
+                    }
+                    ySel.value = String(cy);
+                }
+                p.year = ySel.value;
+                p.semester = selVal;
+            }
             showLoading('reportContent');
             var d = await api('report_semester', p);
             var s = d.summary, pd = d.period;

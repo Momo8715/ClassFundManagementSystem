@@ -38,7 +38,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <!-- 主题：localStorage 控制，防闪烁 -->
     <script data-cfasync="false">window.__cfRLUnblockHandlers = true;(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');})()</script>
     <!-- 样式表 -->
-    <link rel="stylesheet" href="assets/css/style.css?v=2">
+    <link rel="stylesheet" href="assets/css/style.css?v=3">
     </head>
 <body>
     <!-- 加载提示 -->
@@ -434,7 +434,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=2" data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=3" data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">
