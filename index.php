@@ -38,7 +38,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <!-- 主题：localStorage 控制，防闪烁 -->
     <script data-cfasync="false">window.__cfRLUnblockHandlers = true;(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');})()</script>
     <!-- 样式表 -->
-    <link rel="stylesheet" href="assets/css/style.css?v=4">
+    <link rel="stylesheet" href="assets/css/style.css?v=5">
     </head>
 <body>
     <!-- 加载提示 -->
@@ -152,17 +152,18 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
                             <option value="autumn">秋季学期</option>
                         </select>
                         <button class="btn btn-primary btn-sm" onclick="renderReport()">🔍 生成报表</button>
+                        <button class="btn btn-outline btn-sm" onclick="downloadReport()">📥 下载 Excel</button>
                         <button class="btn btn-outline btn-sm" onclick="window.print()">🖨️ 打印</button>
                     </div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
-                        <h4 style="font-size:13px;margin-bottom:10px">📊 月度收支对比</h4>
-                        <canvas id="reportChartBar" height="200"></canvas>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;max-width:860px">
+                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
+                        <h4 style="font-size:12px;margin-bottom:6px">📊 月度收支对比</h4>
+                        <canvas id="reportChartBar" height="130"></canvas>
                     </div>
-                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
-                        <h4 style="font-size:13px;margin-bottom:10px">🍩 支出分类占比</h4>
-                        <canvas id="reportChartPie" height="200"></canvas>
+                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
+                        <h4 style="font-size:12px;margin-bottom:6px">🍩 支出分类占比</h4>
+                        <canvas id="reportChartPie" height="130"></canvas>
                     </div>
                 </div>
                 <div id="reportContent"></div>
@@ -434,7 +435,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=4" data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=5" data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">

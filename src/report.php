@@ -4,11 +4,10 @@
  * 按学期汇总收支、分类占比、月度趋势、班费收缴情况
  */
 
-function handleReportSemester() {
-    requirePermission('viewTransactions');
-
+/** 构建报表数据（供页面展示与 Excel 导出共用） */
+function buildReportData(array $params): array {
     // 优先使用用户自定义学期（semesters 表），保证报表与学期管理数据一致
-    $sid = intval($_GET['semester_id'] ?? 0);
+    $sid = intval($params['semester_id'] ?? 0);
     if ($sid > 0) {
         $stmt = db()->prepare("SELECT * FROM semesters WHERE id=:id");
         $stmt->execute([':id' => $sid]);
@@ -22,10 +21,10 @@ function handleReportSemester() {
         $custom = true;
     } else {
         // 回退：内置固定学期范围（可被自定义 start/end 覆盖）
-        $year = intval($_GET['year'] ?? date('Y'));
+        $year = intval($params['year'] ?? date('Y'));
         // 限制年份合理范围，防止非法值产生无效日期
         if ($year < 2000 || $year > 2100) $year = (int)date('Y');
-        $semester = in_array($_GET['semester'] ?? '', ['spring', 'autumn']) ? $_GET['semester'] : 'spring';
+        $semester = in_array($params['semester'] ?? '', ['spring', 'autumn']) ? $params['semester'] : 'spring';
 
         if ($semester === 'autumn') {
             $start = "{$year}-09-01";
@@ -34,10 +33,10 @@ function handleReportSemester() {
             $start = "{$year}-03-01";
             $end = "{$year}-08-31";
         }
-        if (!empty($_GET['start']) && isValidDate($_GET['start'])) $start = $_GET['start'];
-        if (!empty($_GET['end']) && isValidDate($_GET['end'])) $end = $_GET['end'];
+        if (!empty($params['start']) && isValidDate($params['start'])) $start = $params['start'];
+        if (!empty($params['end']) && isValidDate($params['end'])) $end = $params['end'];
 
-        $custom = !empty($_GET['start']) || !empty($_GET['end']);
+        $custom = !empty($params['start']) || !empty($params['end']);
         $label = $semester === 'autumn' ? "{$year} 秋季学期" : "{$year} 春季学期";
         if ($custom) $label = "{$start} ~ {$end}";
     }
@@ -97,7 +96,7 @@ function handleReportSemester() {
         $m['net']     = round((float)$m['income'] - (float)$m['expense'], 2);
     }
 
-    jsonOutput([
+    return [
         'period'  => [
             'start' => $start, 'end' => $end, 'label' => $label,
             'year' => $year, 'semester' => $semester, 'custom' => $custom,
@@ -116,7 +115,48 @@ function handleReportSemester() {
         ],
         'by_category' => $byCategory,
         'by_month'    => $byMonth,
-    ]);
+    ];
+}
+
+function handleReportSemester() {
+    requirePermission('viewTransactions');
+    jsonOutput(buildReportData($_GET));
+}
+
+/** 导出学期报表为 xlsx（便于打印/存档） */
+function handleExportReport() {
+    requirePermission('viewTransactions');
+
+    $d = buildReportData($_GET);
+    $p = $d['period'];
+    $s = $d['summary'];
+
+    $rows = [
+        [$p['label'] . ' - 收支汇总报表', '', '', ''],
+        ['统计区间', $p['start'] . ' ~ ' . $p['end'], '', ''],
+        ['', '', '', ''],
+        ['期初余额', number_format($s['begin_balance'], 2, '.', ''), '', ''],
+        ['总收入', number_format($s['total_income'], 2, '.', ''), $s['income_count'] . ' 笔', ''],
+        ['总支出', number_format($s['total_expense'], 2, '.', ''), $s['expense_count'] . ' 笔', ''],
+        ['期末结余', number_format($s['balance'], 2, '.', ''), $s['balance'] >= 0 ? '正常' : '超支', ''],
+        ['班费收缴', '实收 ' . number_format($s['collected_amount'], 2, '.', '') . ' 元', '应收 ' . number_format($s['expected_amount'], 2, '.', '') . ' 元', '收缴率 ' . $s['collect_rate'] . '%（' . $s['rounds'] . ' 轮）'],
+        ['', '', '', ''],
+        ['—— 分类明细 ——', '', '', ''],
+    ];
+    foreach ($d['by_category'] as $c) {
+        $rows[] = [($c['type'] === 'income' ? '收入' : '支出') . '：' . $c['category'], number_format($c['total'], 2, '.', ''), $c['cnt'] . ' 笔', ''];
+    }
+    if (empty($d['by_category'])) $rows[] = ['（本学期暂无收支记录）', '', '', ''];
+
+    $rows[] = ['', '', '', ''];
+    $rows[] = ['—— 月度明细 ——', '', '', ''];
+    foreach ($d['by_month'] as $m) {
+        $rows[] = [$m['month'], '收入 ' . number_format($m['income'], 2, '.', '') . ' 元', '支出 ' . number_format($m['expense'], 2, '.', '') . ' 元', '净额 ' . number_format($m['net'], 2, '.', '') . ' 元'];
+    }
+    if (empty($d['by_month'])) $rows[] = ['（本学期暂无月度数据）', '', '', ''];
+
+    outputSimpleXlsx('学期报表_' . date('Ymd_His'), '学期报表', ['项目', '金额', '备注', '说明'], $rows);
+    exit;
 }
 
 // ==================== 学期管理 ====================

@@ -448,6 +448,19 @@
         } catch (e) { toast(e.message, 'error'); }
     }
 
+    function downloadReport() {
+        var sSel = document.getElementById('reportSemester');
+        var selVal = sSel.value;
+        var qs;
+        if (selVal.indexOf('id:') === 0) {
+            qs = 'semester_id=' + selVal.substring(3);
+        } else {
+            var ySel = document.getElementById('reportYear');
+            qs = 'year=' + encodeURIComponent(ySel.value || '') + '&semester=' + encodeURIComponent(selVal);
+        }
+        window.location.href = 'api.php?action=export_report&' + qs;
+    }
+
     function drawReportCharts(d) {
         if (!window.Chart) return;
         var months = d.by_month || [];
@@ -771,4 +784,5 @@
     window.setPerPerson = setPerPerson; window.closeModal = closeModal; window.refreshUI = refreshUI;
     window.checkUpdate = checkUpdate; window.doUpgrade = doUpgrade; window.renderRecycle = renderRecycle; window.renderSecurity = renderSecurity; window.renderPayments = renderPayments;
     window.renderReport = renderReport;
+    window.downloadReport = downloadReport;
 })();

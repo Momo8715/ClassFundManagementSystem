@@ -59,6 +59,9 @@ switch ($action) {
     case 'report_semester':
         handleReportSemester();
         break;
+    case 'export_report':
+        handleExportReport();
+        break;
     case 'semesters':
         handleSemesters($method);
         break;
