@@ -192,6 +192,18 @@
         if (nv) nv.classList.add('active');
         var handlers = { dashboard: renderDashboard, transactions: renderTransactions, report: renderReport, students: renderStudents, roster: renderRoster, payments: renderPayments, security: renderSecurity, recycle: renderRecycle, logs: renderLogs };
         if (handlers[p]) handlers[p]();
+        // 移动端切换页面后自动关闭抽屉
+        toggleSidebar(false);
+    }
+
+    // 移动端抽屉式侧边栏
+    function toggleSidebar(open) {
+        var sb = document.getElementById('mainSidebar');
+        var ov = document.getElementById('sidebarOverlay');
+        if (!sb) return;
+        var isOpen = typeof open === 'boolean' ? open : !sb.classList.contains('open');
+        if (isOpen) { sb.classList.add('open'); if (ov) ov.classList.add('show'); }
+        else { sb.classList.remove('open'); if (ov) ov.classList.remove('show'); }
     }
 
     // ========== 弹窗 ==========
@@ -370,15 +382,23 @@
                 p.semester = selVal;
             }
             showLoading('reportContent');
-            var d = await api('report_semester', p);
+            var d;
+            // 性能优化：相同学期参数 30 秒内直接使用缓存，避免重复请求
+            var cacheKey = JSON.stringify(p);
+            if (window._reportCache && window._reportCache.key === cacheKey && Date.now() - window._reportCache.ts < 30000) {
+                d = window._reportCache.data;
+            } else {
+                d = await api('report_semester', p);
+                window._reportCache = { key: cacheKey, data: d, ts: Date.now() };
+            }
             var s = d.summary, pd = d.period;
 
-            // 汇总卡片
+            // 汇总卡片（期末结余大字强调）
             var html = '<div class="cards">' +
+                '<div class="card" style="background:linear-gradient(135deg,var(--primary),#6d8bff);color:#fff"><div class="card-label" style="color:rgba(255,255,255,.85)">🏦 期末结余</div><div class="card-value" style="font-size:28px;color:#fff">¥' + s.balance.toFixed(2) + '</div><div class="card-sub" style="color:rgba(255,255,255,.8)">' + (s.balance >= 0 ? '✅ 收支正常' : '⚠️ 已超支') + '</div></div>' +
                 '<div class="card"><div class="card-label">📆 期初余额</div><div class="card-value" style="color:var(--text)">¥' + s.begin_balance.toFixed(2) + '</div><div class="card-sub">学期开始前累计</div></div>' +
                 '<div class="card"><div class="card-label">💰 总收入</div><div class="card-value income">¥' + s.total_income.toFixed(2) + '</div><div class="card-sub">' + s.income_count + ' 笔</div></div>' +
                 '<div class="card"><div class="card-label">💸 总支出</div><div class="card-value expense">¥' + s.total_expense.toFixed(2) + '</div><div class="card-sub">' + s.expense_count + ' 笔</div></div>' +
-                '<div class="card"><div class="card-label">🏦 期末结余</div><div class="card-value balance">¥' + s.balance.toFixed(2) + '</div><div class="card-sub">' + (s.balance >= 0 ? '✅ 正常' : '⚠️ 超支') + '</div></div>' +
                 '<div class="card"><div class="card-label">🎯 班费收缴率</div><div class="card-value" style="color:' + (s.collect_rate >= 90 ? 'var(--success)' : '#f59e0b') + '">' + s.collect_rate + '%</div><div class="card-sub">¥' + s.collected_amount.toFixed(2) + ' / 应收 ¥' + s.expected_amount.toFixed(2) + '（' + s.rounds + ' 轮）</div></div>' +
                 '</div>';
 
@@ -670,7 +690,7 @@
     function deleteStu(id) { if (!confirm('确定删除？')) return; api('users&id=' + id, {}, 'DELETE').then(function () { renderStudents(); toast('已删除'); }).catch(function (e) { toast(e.message, 'error'); }); }
 
     // ========== 花名册 ==========
-    async function renderRoster() { try { var d = await api('roster'); var list = d.roster || []; var canDel = hasPerm('deleteRoster'), html = ''; if (list.length === 0) html = '<div class="empty"><div class="icon">📋</div>花名册为空，请先导入</div>'; else { html = '<table><thead><tr><th>ID</th><th>姓名</th>' + (canDel ? '<th>操作</th>' : '') + '</tr></thead><tbody>'; list.forEach(function (s) { html += '<tr><td>#' + s.id + '</td><td>' + escapeHtml(s.name) + '</td>' + (canDel ? '<td><button class="btn btn-danger btn-sm" onclick="window._deleteRoster(' + s.id + ')">🗑️</button></td>' : '') + '</tr>'; }); html += '</tbody></table>'; } document.getElementById('rosterTable').innerHTML = html; } catch (e) { toast(e.message, 'error'); } }
+    async function renderRoster() { try { var d = await api('roster'); var list = d.roster || []; var canDel = hasPerm('deleteRoster'), html = ''; if (list.length === 0) html = '<div class="empty"><div class="icon">📋</div>花名册为空，请先导入</div>'; else { html = '<table><thead><tr><th>序号</th><th>姓名</th>' + (canDel ? '<th>操作</th>' : '') + '</tr></thead><tbody>'; list.forEach(function (s, i) { html += '<tr><td>' + (i + 1) + '</td><td>' + escapeHtml(s.name) + '</td>' + (canDel ? '<td><button class="btn btn-danger btn-sm" onclick="window._deleteRoster(' + s.id + ')">🗑️</button></td>' : '') + '</tr>'; }); html += '</tbody></table>'; } document.getElementById('rosterTable').innerHTML = html; } catch (e) { toast(e.message, 'error'); } }
 
     function showRosterImport() { var n = prompt('请输入学生姓名，每行一人：'); if (!n || !n.trim()) return; var l = n.split(/[\r\n]+/).map(function (s) { return s.trim(); }).filter(function (s) { return s; }); if (!l.length) return; api('roster', { names: l }, 'POST').then(function (d) { toast('已导入 ' + d.imported + ' 人'); renderRoster(); }).catch(function (e) { toast(e.message, 'error'); }); }
 
@@ -778,6 +798,7 @@
     window.toggleTheme = toggleTheme;
     window.showChangePassword = _f1; window.changePassword = _f2;
     window.switchPage = switchPage; window.showAddTransaction = showAddTransaction;
+    window.toggleSidebar = toggleSidebar;
     window.onTxTypeChange = onTxTypeChange; window.calcPerPerson = calcPerPerson; window.calcExpected = calcExpected;
     window.selectAllRoster = selectAllRoster; window.clearRoster = clearRoster;
     window.saveTransaction = saveTransaction; window.uploadTxImages = uploadTxImages; window.removeTxImage = removeTxImage;

@@ -38,7 +38,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <!-- 主题：localStorage 控制，防闪烁 -->
     <script data-cfasync="false">window.__cfRLUnblockHandlers = true;(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');})()</script>
     <!-- 样式表 -->
-    <link rel="stylesheet" href="assets/css/style.css?v=7">
+    <link rel="stylesheet" href="assets/css/style.css?v=8">
     </head>
 <body>
     <!-- 加载提示 -->
@@ -75,7 +75,9 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <!-- ========== 主应用 ========== -->
     <div class="app<?php echo $loggedIn ? ' active' : ''; ?>" id="app">
         <!-- 侧边栏 -->
-        <aside class="sidebar">
+        <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar(true)" aria-label="打开菜单">☰</button>
+        <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar(false)"></div>
+        <aside class="sidebar" id="mainSidebar">
             <div class="sidebar-header">
                 <h2>📒 班费管理</h2>
                 <div class="user-info" id="sidebarUser">
@@ -435,7 +437,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=7" data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=8" data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">
