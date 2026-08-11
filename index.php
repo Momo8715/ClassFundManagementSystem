@@ -38,7 +38,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <!-- 主题：localStorage 控制，防闪烁 -->
     <script data-cfasync="false">window.__cfRLUnblockHandlers = true;(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');})()</script>
     <!-- 样式表 -->
-    <link rel="stylesheet" href="assets/css/style.css?v=5">
+    <link rel="stylesheet" href="assets/css/style.css?v=6">
     </head>
 <body>
     <!-- 加载提示 -->
@@ -127,14 +127,14 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
             <!-- 仪表盘 -->
             <div class="page active" id="page-dashboard">
                 <div class="cards" id="dashboardCards"></div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
-                        <h4 style="font-size:13px;margin-bottom:10px">📈 月度收支趋势</h4>
-                        <canvas id="chartTrend" height="200"></canvas>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;max-width:860px">
+                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
+                        <h4 style="font-size:12px;margin-bottom:6px">📈 月度收支趋势</h4>
+                        <canvas id="chartTrend" height="130"></canvas>
                     </div>
-                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
-                        <h4 style="font-size:13px;margin-bottom:10px">🍩 支出分类占比</h4>
-                        <canvas id="chartPie" height="200"></canvas>
+                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
+                        <h4 style="font-size:12px;margin-bottom:6px">🍩 支出分类占比</h4>
+                        <canvas id="chartPie" height="130"></canvas>
                     </div>
                 </div>
                 <div class="section-header"><h3>📋 最近收支记录</h3></div>
@@ -435,7 +435,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=5" data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=6" data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">
