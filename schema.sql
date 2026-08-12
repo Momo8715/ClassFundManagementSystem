@@ -99,3 +99,9 @@ CREATE TABLE IF NOT EXISTS `semesters` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY `uk_name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学期管理';
+
+-- 系统元数据（key-value，用于记录 schema 版本，跳过重复迁移）
+CREATE TABLE IF NOT EXISTS `system_meta` (
+  `meta_key`   VARCHAR(50) PRIMARY KEY,
+  `meta_value` VARCHAR(255) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统元数据';

@@ -68,6 +68,14 @@ function autoMigrate(): void {
     try {
         $db = db();
 
+        // ---- schema 版本检查：已是最新则跳过，避免每次请求执行十几条 SHOW COLUMNS/ALTER ----
+        $db->exec("CREATE TABLE IF NOT EXISTS system_meta (
+            meta_key VARCHAR(50) PRIMARY KEY,
+            meta_value VARCHAR(255) NOT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统元数据(key-value)'");
+        $currentVersion = $db->query("SELECT meta_value FROM system_meta WHERE meta_key='schema_version'")->fetchColumn();
+        if ($currentVersion === SCHEMA_VERSION) return;
+
         // transactions 表新增字段检测
         try {
             $cols = $db->query("SHOW COLUMNS FROM transactions")->fetchAll(PDO::FETCH_COLUMN);
@@ -190,6 +198,10 @@ function autoMigrate(): void {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uk_name (name)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学期管理'");
+
+        // ---- 全部迁移完成，记录版本号（异常时不会执行到这里，下次请求会重试） ----
+        $db->exec("INSERT INTO system_meta (meta_key, meta_value) VALUES ('schema_version', '" . SCHEMA_VERSION . "')
+            ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)");
     } catch (Exception $e) {
         error_log('[班费系统] autoMigrate 失败: ' . $e->getMessage());
     }
@@ -198,6 +210,9 @@ function autoMigrate(): void {
 // ========== 系统配置 ==========
 define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
+// 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
+// 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
+define('SCHEMA_VERSION', '1.5.5');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([
