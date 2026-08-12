@@ -361,17 +361,26 @@
                     var sd = await api('semesters');
                     var sems = sd.semesters || [];
                     if (sems.length) {
+                        // 存在自定义学期：清空固定「春季/秋季」选项，仅保留自定义学期，避免两个体系混选
+                        while (sSel.firstChild) sSel.removeChild(sSel.firstChild);
                         sems.forEach(function (s) {
                             var o = document.createElement('option');
                             o.value = 'id:' + s.id;
                             o.textContent = s.name + '（' + s.start_date + ' ~ ' + s.end_date + '）' + (s.status === 'active' ? ' · 进行中' : ' · 已归档');
                             sSel.appendChild(o);
                         });
-                        // 默认选中进行中的学期
+                        // 默认选中进行中的学期；无进行中则选最新的
                         var active = sems.filter(function (x) { return x.status === 'active'; });
-                        if (active.length) sSel.value = 'id:' + active[0].id;
+                        sSel.value = 'id:' + (active.length ? active[0].id : sems[0].id);
+                        // 自定义学期已含起止日期，隐藏年份下拉框（避免无效交互）
+                        if (ySel) ySel.style.display = 'none';
+                    } else if (ySel) {
+                        // 无自定义学期：显示年份下拉框，走内置春季/秋季逻辑
+                        ySel.style.display = '';
                     }
-                } catch (e) {}
+                } catch (e) {
+                    if (ySel) ySel.style.display = '';
+                }
             }
             var selVal = sSel.value;
             var p = {};

@@ -152,8 +152,8 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
                 <div class="section-header">
                     <h3>📈 学期汇总报表</h3>
                     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                        <select id="reportYear" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)"></select>
-                        <select id="reportSemester" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                        <select id="reportYear" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)" onchange="renderReport()"></select>
+                        <select id="reportSemester" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)" onchange="renderReport()">
                             <option value="spring">春季学期</option>
                             <option value="autumn">秋季学期</option>
                         </select>
@@ -441,7 +441,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=10" data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=11" data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">
