@@ -187,6 +187,20 @@ function autoMigrate(): void {
         if (!in_array('payer_ids', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN payer_ids TEXT DEFAULT NULL COMMENT '缴费学生ID(JSON数组或all)' AFTER description");
         // transactions.images 多图凭证
         if (!in_array('images', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN images TEXT DEFAULT NULL COMMENT '多图凭证(JSON数组)' AFTER image_path");
+        // transactions.image_ids 数据库凭证图ID（v1.5.6：凭证图片存库，列表优先加载缩略图）
+        if (!in_array('image_ids', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN image_ids TEXT DEFAULT NULL COMMENT '凭证图片ID(JSON数组，存tx_images.id)' AFTER images");
+
+        // tx_images 凭证图片库（v1.5.6：原图+缩略图二进制存数据库，不再依赖 uploads/ 文件）
+        $db->exec("CREATE TABLE IF NOT EXISTS tx_images (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            transaction_id INT NOT NULL DEFAULT 0 COMMENT '关联收支记录ID，0=未关联(上传中)',
+            seq INT NOT NULL DEFAULT 0 COMMENT '展示顺序',
+            mime VARCHAR(50) NOT NULL DEFAULT 'image/jpeg',
+            thumb MEDIUMBLOB NOT NULL COMMENT '缩略图(最长边400px,JPEG)',
+            full MEDIUMBLOB NOT NULL COMMENT '原图',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_tx (transaction_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='凭证图片(数据库存储)'");
 
         // semesters 学期表
         $db->exec("CREATE TABLE IF NOT EXISTS semesters (
@@ -212,7 +226,7 @@ define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
 // 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
 // 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
-define('SCHEMA_VERSION', '1.5.5');
+define('SCHEMA_VERSION', '1.5.6');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([

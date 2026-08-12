@@ -19,6 +19,30 @@ function normalizeImages($images): ?string {
     return json_encode($images, JSON_UNESCAPED_UNICODE);
 }
 
+/** 规范化数据库凭证图 ID（数组或 JSON 字符串 → JSON 数组，元素取整） */
+function normalizeImageIds($ids): ?string {
+    if ($ids === null || $ids === '' || $ids === '[]') return null;
+    if (is_string($ids)) {
+        $decoded = json_decode($ids, true);
+        if (is_array($decoded)) $ids = $decoded;
+        else $ids = [$ids];
+    }
+    if (!is_array($ids)) return null;
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if (empty($ids)) return null;
+    return json_encode($ids, JSON_UNESCAPED_UNICODE);
+}
+
+/** 把数据库凭证图片关联到收支记录（图片上传时 transaction_id=0） */
+function linkImagesToTransaction(int $txId, array $imageIds): void {
+    $imageIds = array_values(array_unique(array_filter(array_map('intval', $imageIds))));
+    if (empty($imageIds)) return;
+    $stmt = db()->prepare("UPDATE tx_images SET transaction_id=:tid WHERE id=:iid");
+    foreach ($imageIds as $iid) {
+        $stmt->execute([':tid' => $txId, ':iid' => $iid]);
+    }
+}
+
 function handleTransactions(string $method) {
     requirePermission('viewTransactions');
 
@@ -116,6 +140,8 @@ function handleTransactionsPost() {
         $arr = json_decode($imagesJson, true);
         if (!empty($arr)) $imagePath = $arr[0];
     }
+    // v1.5.6：数据库凭证图 ID（优先于文件路径方案）
+    $imageIdsJson = normalizeImageIds($input['image_ids'] ?? null);
 
     if (!in_array($type, ['income', 'expense'])) jsonOutput(['error' => '类型无效'], 400);
     if ($amount <= 0) jsonOutput(['error' => '金额必须大于 0'], 400);
@@ -147,7 +173,7 @@ function handleTransactionsPost() {
     }
 
     $user = currentUser();
-    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, date, description, payer_ids, category, image_path, images, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :d, :desc, :pids, :cat, :img, :imgs, :rb)");
+    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, date, description, payer_ids, category, image_path, images, image_ids, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :d, :desc, :pids, :cat, :img, :imgs, :iids, :rb)");
     $stmt->execute([
         ':t'    => $type,
         ':sc'   => $subCat ?: null,
@@ -160,9 +186,15 @@ function handleTransactionsPost() {
         ':cat'  => $cat,
         ':img'  => $imagePath ?: null,
         ':imgs' => $imagesJson,
+        ':iids' => $imageIdsJson,
         ':rb'   => $user['id']
     ]);
     $newId = (int)db()->lastInsertId();
+
+    // 关联数据库凭证图片（上传时 transaction_id=0，保存时归位）
+    if ($imageIdsJson) {
+        linkImagesToTransaction($newId, json_decode($imageIdsJson, true));
+    }
 
     addLog($user['id'], $user['username'], 'create_transaction', 'transaction', $newId, [
         'type' => $type, 'amount' => $amount, 'date' => $date, 'description' => $desc
@@ -215,6 +247,12 @@ function handleTransactionsPut() {
             $arr = json_decode($newImages, true);
             if (!empty($arr)) $newImg = $arr[0];
         }
+        // v1.5.6：数据库凭证图 ID
+        if (array_key_exists('image_ids', $input)) {
+            $newImageIds = normalizeImageIds($input['image_ids']);
+        } else {
+            $newImageIds = $old['image_ids'] ?? null;
+        }
 
         // 处理 expected_amount（修复：之前 PUT 丢失此字段）
         if (array_key_exists('expected_amount', $input)) {
@@ -245,7 +283,7 @@ function handleTransactionsPut() {
             $newPayerIds = $old['payer_ids'];
         }
 
-        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, date=:d, description=:desc, payer_ids=:pids, category=:cat, image_path=:img, images=:imgs WHERE id=:id");
+        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, date=:d, description=:desc, payer_ids=:pids, category=:cat, image_path=:img, images=:imgs, image_ids=:iids WHERE id=:id");
         $stmt->execute([
             ':t'    => $newType,
             ':sc'   => $newSubCat,
@@ -258,8 +296,14 @@ function handleTransactionsPut() {
             ':cat'  => $newCat,
             ':img'  => $newImg,
             ':imgs' => $newImages,
+            ':iids' => $newImageIds,
             ':id'   => $id,
         ]);
+
+        // 新上传的数据库凭证图关联到本记录
+        if ($newImageIds) {
+            linkImagesToTransaction($id, json_decode($newImageIds, true));
+        }
 
         $user = currentUser();
         addLog($user['id'], $user['username'], 'update_transaction', 'transaction', $id);

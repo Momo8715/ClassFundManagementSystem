@@ -38,6 +38,12 @@
         return div.innerHTML;
     }
 
+    // 凭证图 URL：数字 = 数据库图片 ID（v1.5.6，thumb=1 输出缩略图）；字符串 = 旧版文件路径（兼容）
+    function imgUrl(item, thumb) {
+        if (typeof item === 'number') return API + '?action=tx_image&id=' + item + (thumb ? '&thumb=1' : '');
+        return String(item);
+    }
+
     function toast(msg, type) {
         type = type || 'success';
         var t = document.createElement('div');
@@ -321,9 +327,13 @@
                 html = '<table><thead><tr>' + (cd ? '<th style="width:28px"><input type="checkbox" onclick="window._toggleAllTx(this)"></th>' : '') + '<th>ID</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th>分类</th><th>凭证</th><th>记录人</th>' + (ce || cd ? '<th>操作</th>' : '') + '</tr></thead><tbody>';
                 list.forEach(function (t) {
                     var imgs = [];
-                    if (t.images) { try { var ii = typeof t.images === 'string' ? JSON.parse(t.images) : t.images; if (Array.isArray(ii)) imgs = ii.filter(Boolean); } catch (e) {} }
-                    if (!imgs.length && t.image_path) imgs = [t.image_path];
-                    var imgCell = imgs.length ? '<td>' + imgs.map(function (p) { return '<a href="' + escapeHtml(p) + '" target="_blank"><img src="' + escapeHtml(p) + '" style="width:30px;height:24px;object-fit:cover;border-radius:4px;margin-right:2px;border:1px solid var(--border)"></a>'; }).join('') + '</td>' : '<td style="color:var(--text-secondary)">-</td>';
+                    // v1.5.6：优先数据库凭证图（缩略图加载）
+                    if (t.image_ids) { try { var iids = typeof t.image_ids === 'string' ? JSON.parse(t.image_ids) : t.image_ids; if (Array.isArray(iids)) imgs = iids.filter(Boolean); } catch (e) {} }
+                    if (!imgs.length) {
+                        if (t.images) { try { var ii = typeof t.images === 'string' ? JSON.parse(t.images) : t.images; if (Array.isArray(ii)) imgs = ii.filter(Boolean); } catch (e) {} }
+                        if (!imgs.length && t.image_path) imgs = [t.image_path];
+                    }
+                    var imgCell = imgs.length ? '<td>' + imgs.map(function (p) { return '<a href="' + escapeHtml(imgUrl(p, false)) + '" target="_blank" title="查看原图"><img src="' + escapeHtml(imgUrl(p, true)) + '" style="width:30px;height:24px;object-fit:cover;border-radius:4px;margin-right:2px;border:1px solid var(--border)" loading="lazy"></a>'; }).join('') + '</td>' : '<td style="color:var(--text-secondary)">-</td>';
                     html += '<tr>' + (cd ? '<td><input type="checkbox" class="txCb" value="' + t.id + '"></td>' : '') + '<td>#' + t.id + '</td><td>' + escapeHtml(t.date) + '</td><td><span class="badge badge-' + (t.type === 'income' ? 'income' : 'expense') + '">' + (t.type === 'income' ? '收入' : '支出') + '</span></td>' +
                         '<td style="font-weight:700;color:' + (t.type === 'income' ? 'var(--success)' : 'var(--danger)') + '">' + (t.type === 'income' ? '+' : '-') + '¥' + Number(t.amount).toFixed(2) + '</td>' +
                         '<td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.category) + '</td><td>' + escapeHtml(t.recorder_name || '未知') + '</td>';
@@ -548,8 +558,12 @@
         document.getElementById('txExpected').value = t.expected_amount || '';
         document.getElementById('txPayerIds').value = t.payer_ids || '';
         txImageList = [];
-        if (t.images) { try { var imgs = typeof t.images === 'string' ? JSON.parse(t.images) : t.images; if (Array.isArray(imgs)) txImageList = imgs.filter(Boolean); } catch (e) {} }
-        if (!txImageList.length && t.image_path) txImageList = [t.image_path];
+        // v1.5.6：优先数据库凭证图 ID
+        if (t.image_ids) { try { var iids = typeof t.image_ids === 'string' ? JSON.parse(t.image_ids) : t.image_ids; if (Array.isArray(iids)) txImageList = iids.filter(Boolean); } catch (e) {} }
+        if (!txImageList.length) {
+            if (t.images) { try { var imgs = typeof t.images === 'string' ? JSON.parse(t.images) : t.images; if (Array.isArray(imgs)) txImageList = imgs.filter(Boolean); } catch (e) {} }
+            if (!txImageList.length && t.image_path) txImageList = [t.image_path];
+        }
         renderTxImagePreview();
         var subVal = document.getElementById('txSubCategory').value;
         document.getElementById('txSourceGroup').style.display = (subVal === '其他来源' ? 'block' : 'none');
@@ -600,7 +614,10 @@
         var subCat = document.getElementById('txSubCategory').value;
         var srcInfo = document.getElementById('txSourceInfo').value.trim();
         if (subCat === '其他来源' && !srcInfo) return toast('请填写来源信息', 'error');
-        var payload = { type: document.getElementById('txType').value, sub_category: subCat, source_info: subCat === '其他来源' ? srcInfo : '', amount: parseFloat(document.getElementById('txAmount').value), date: document.getElementById('txDate').value, description: document.getElementById('txDesc').value.trim(), category: document.getElementById('txCategory').value, image_path: txImageList.length ? txImageList[0] : '', images: txImageList, expected_amount: document.getElementById('txExpected').value || null };
+        // v1.5.6：数字 = 数据库图ID（image_ids），字符串 = 旧版文件路径（images/image_path 兼容）
+        var imgIds = txImageList.filter(function (x) { return typeof x === 'number'; });
+        var imgPaths = txImageList.filter(function (x) { return typeof x !== 'number'; });
+        var payload = { type: document.getElementById('txType').value, sub_category: subCat, source_info: subCat === '其他来源' ? srcInfo : '', amount: parseFloat(document.getElementById('txAmount').value), date: document.getElementById('txDate').value, description: document.getElementById('txDesc').value.trim(), category: document.getElementById('txCategory').value, image_ids: imgIds, images: imgPaths, image_path: imgPaths.length ? imgPaths[0] : '', expected_amount: document.getElementById('txExpected').value || null };
         if (subCat === '班费收缴') { var cbs = document.querySelectorAll('.rosterCb:checked'); if (cbs.length === document.querySelectorAll('.rosterCb').length) payload.payer_ids = 'all'; else if (cbs.length > 0) payload.payer_ids = JSON.stringify(Array.from(cbs).map(function (cb) { return parseInt(cb.value); })); }
         if (!payload.amount || payload.amount <= 0) return toast('无效金额', 'error');
         if (!payload.date) return toast('请选择日期', 'error');
@@ -621,7 +638,7 @@
                 var r = await fetch(API + '?action=upload_image', { method: 'POST', body: fd });
                 var data = await r.json();
                 if (!r.ok) throw new Error(data.error);
-                txImageList.push(data.path);
+                txImageList.push(data.id);
             } catch (e) { toast('第 ' + (i + 1) + ' 张上传失败: ' + e.message, 'error'); }
         }
         document.getElementById('txImageFile').value = '';
@@ -634,7 +651,7 @@
         if (!box) return;
         if (!txImageList.length) { box.innerHTML = ''; return; }
         box.innerHTML = txImageList.map(function (p, i) {
-            return '<div style="display:inline-block;position:relative;margin:4px"><img src="' + escapeHtml(p) + '" style="max-width:120px;max-height:90px;border-radius:6px;border:1px solid var(--border)"><span style="position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:18px;height:18px;line-height:18px;text-align:center;font-size:11px;cursor:pointer" onclick="window._removeTxImage(' + i + ')">×</span></div>';
+            return '<div style="display:inline-block;position:relative;margin:4px"><img src="' + escapeHtml(imgUrl(p, true)) + '" style="max-width:120px;max-height:90px;border-radius:6px;border:1px solid var(--border)"><span style="position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:18px;height:18px;line-height:18px;text-align:center;font-size:11px;cursor:pointer" onclick="window._removeTxImage(' + i + ')">×</span></div>';
         }).join('');
     }
 

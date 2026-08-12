@@ -60,6 +60,38 @@ function handleImport() {
 }
 
 // ==================== 图片上传 ====================
+/** 用 GD 生成 JPEG 缩略图（最长边 $maxEdge，质量 75）；失败返回 null */
+function makeImageThumbnail(string $data, int $maxEdge = 400): ?string {
+    if (!extension_loaded('gd')) return null;
+    $img = @imagecreatefromstring($data);
+    if ($img === false) return null;
+    $w = imagesx($img);
+    $h = imagesy($img);
+    if ($w < 1 || $h < 1) { imagedestroy($img); return null; }
+
+    if ($w <= $maxEdge && $h <= $maxEdge) {
+        $nw = $w; $nh = $h;
+    } else {
+        $scale = min($maxEdge / $w, $maxEdge / $h);
+        $nw = max(1, (int)round($w * $scale));
+        $nh = max(1, (int)round($h * $scale));
+    }
+
+    $thumb = imagecreatetruecolor($nw, $nh);
+    if ($thumb === false) { imagedestroy($img); return null; }
+    // 先整幅填白底，再复制源图（JPEG 不支持透明，透明 PNG 的区域保持白色）
+    $white = imagecolorallocate($thumb, 255, 255, 255);
+    imagefilledrectangle($thumb, 0, 0, $nw, $nh, $white);
+    imagecopyresampled($thumb, $img, 0, 0, 0, 0, $nw, $nh, $w, $h);
+
+    ob_start();
+    imagejpeg($thumb, null, 75);
+    $out = ob_get_clean();
+    imagedestroy($img);
+    imagedestroy($thumb);
+    return ($out === false || $out === '') ? null : $out;
+}
+
 function handleUploadImage() {
     requirePermission('addTransaction');
     requireCsrfToken();
@@ -77,7 +109,7 @@ function handleUploadImage() {
         jsonOutput(['error' => $error], 400);
     }
 
-    // 通过 MIME 确定安全扩展名（fileinfo 缺失时回退 getimagesize）
+    // 通过 MIME 确定安全类型（fileinfo 缺失时回退 getimagesize）
     $mime = '';
     if (function_exists('finfo_open')) {
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
@@ -88,17 +120,51 @@ function handleUploadImage() {
         $info = @getimagesize($file['tmp_name']);
         if ($info !== false) $mime = $info['mime'];
     }
-    $ext = safeExtension($mime);
 
-    $uploadDir = __DIR__ . '/../uploads/';
-    if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
-
-    $newName = date('YmdHis') . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
-    if (!move_uploaded_file($file['tmp_name'], $uploadDir . $newName)) {
-        jsonOutput(['error' => '保存失败，请检查 uploads 目录权限'], 500);
+    // v1.5.6：凭证图片存入数据库（原图 + GD 缩略图），不再写入 uploads/ 目录
+    $full = file_get_contents($file['tmp_name']);
+    if ($full === false || $full === '') {
+        jsonOutput(['error' => '读取图片失败'], 500);
+    }
+    $thumb = makeImageThumbnail($full, 400);
+    if ($thumb === null) {
+        jsonOutput(['error' => '图片处理失败（服务器不支持该图片格式或 GD 不可用）'], 500);
     }
 
-    jsonOutput(['ok' => true, 'path' => 'uploads/' . $newName]);
+    $stmt = db()->prepare("INSERT INTO tx_images (transaction_id, seq, mime, thumb, full) VALUES (0, 0, :mime, :thumb, :full)");
+    $stmt->bindValue(':mime', $mime);
+    $stmt->bindValue(':thumb', $thumb, PDO::PARAM_LOB);
+    $stmt->bindValue(':full', $full, PDO::PARAM_LOB);
+    $stmt->execute();
+    $imgId = (int)db()->lastInsertId();
+
+    jsonOutput(['ok' => true, 'id' => $imgId]);
+}
+
+// ==================== 凭证图片读取（数据库） ====================
+/** api.php?action=tx_image&id=X&thumb=1|0 输出数据库中的凭证图片（登录用户/访客均可查看） */
+function handleTxImage() {
+    requireLogin();
+
+    $id = intval($_GET['id'] ?? 0);
+    if ($id <= 0) jsonOutput(['error' => '无效图片 ID'], 400);
+    $thumb = !empty($_GET['thumb']);
+
+    $stmt = db()->prepare("SELECT mime, thumb, full FROM tx_images WHERE id=:id");
+    $stmt->execute([':id' => $id]);
+    $row = $stmt->fetch();
+    if (!$row) jsonOutput(['error' => '图片不存在'], 404);
+
+    $data = $thumb ? $row['thumb'] : $row['full'];
+    $mime = $row['mime'] ?: 'image/jpeg';
+    if (empty($data)) jsonOutput(['error' => '图片数据为空'], 404);
+
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . strlen($data));
+    // 凭证图片入库后不可变，允许浏览器/CDN 缓存 1 天
+    header('Cache-Control: public, max-age=86400');
+    echo $data;
+    exit;
 }
 
 // ==================== 下载模板 ====================

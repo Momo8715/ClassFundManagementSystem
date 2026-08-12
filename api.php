@@ -105,6 +105,9 @@ switch ($action) {
     case 'upload_image':
         handleUploadImage();
         break;
+    case 'tx_image':
+        handleTxImage();
+        break;
     case 'download_template':
         handleDownloadTemplate();
         break;

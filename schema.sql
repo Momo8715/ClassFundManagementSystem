@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS `transactions` (
   `category`        VARCHAR(100) NOT NULL DEFAULT '其他',
   `image_path`      VARCHAR(500) DEFAULT NULL COMMENT '凭证图片路径',
   `images`          TEXT DEFAULT NULL COMMENT '多图凭证(JSON数组)',
+  `image_ids`       TEXT DEFAULT NULL COMMENT '凭证图片ID(JSON数组，存tx_images.id，v1.5.6)',
   `recorded_by`     INT NOT NULL,
   `deleted_at`      TIMESTAMP NULL DEFAULT NULL COMMENT '软删除时间',
   `created_at`      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -105,3 +106,15 @@ CREATE TABLE IF NOT EXISTS `system_meta` (
   `meta_key`   VARCHAR(50) PRIMARY KEY,
   `meta_value` VARCHAR(255) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统元数据';
+
+-- 凭证图片库（v1.5.6：原图+缩略图二进制存数据库，列表优先加载缩略图）
+CREATE TABLE IF NOT EXISTS `tx_images` (
+  `id`             INT AUTO_INCREMENT PRIMARY KEY,
+  `transaction_id` INT NOT NULL DEFAULT 0 COMMENT '关联收支记录ID，0=未关联(上传中)',
+  `seq`            INT NOT NULL DEFAULT 0 COMMENT '展示顺序',
+  `mime`           VARCHAR(50) NOT NULL DEFAULT 'image/jpeg',
+  `thumb`          MEDIUMBLOB NOT NULL COMMENT '缩略图(最长边400px,JPEG)',
+  `full`           MEDIUMBLOB NOT NULL COMMENT '原图',
+  `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_tx` (`transaction_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='凭证图片(数据库存储)';
