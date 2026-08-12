@@ -17,7 +17,11 @@ if (!isDbInstalled()) {
 }
 
 autoMigrate();
-startSession();
+// 未登录访客不启动 session：避免每次响应都 Set-Cookie: PHPSESSID，
+// 否则 Cloudflare 无法缓存登录页（配合 CF Cache Rules 缓存无 cookie 请求时生效）
+if (session_status() === PHP_SESSION_NONE && !empty($_COOKIE[session_name()])) {
+    startSession();
+}
 $loggedIn = isset($_SESSION['user_id']);
 
 // 确保 CSRF token 已生成（兼容旧 session）
