@@ -37,8 +37,8 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>📒 班级班费管理系统</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📒</text></svg>">
-    <!-- Chart.js 本地化（原 jsdelivr CDN 国内访问慢，改为本地走 Cloudflare 优选 IP） -->
-    <script src="assets/vendor/chart.umd.min.js?v=8" data-cfasync="false"></script>
+    <!-- Chart.js 本地化（原 jsdelivr CDN 国内访问慢，改为本地走 Cloudflare 优选 IP）；defer 不阻塞首屏渲染 -->
+    <script src="assets/vendor/chart.umd.min.js?v=8" defer data-cfasync="false"></script>
     <!-- 主题：localStorage 控制，防闪烁 -->
     <script data-cfasync="false">window.__cfRLUnblockHandlers = true;(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');})()</script>
     <!-- 样式表 -->
