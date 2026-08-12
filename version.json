@@ -1,1 +1,1 @@
-{"version": "1.5.6", "notes": "性能优化（autoMigrate 版本化/Chart.js 本地化/gzip/opcache/登录页可缓存）+ 凭证图片存入数据库并优先加载缩略图", "url": "https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip"}
+{"version": "1.5.6", "notes": "自动发布 v1.5.6", "url": "https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip"}
