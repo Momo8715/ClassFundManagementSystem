@@ -1,1 +1,1 @@
-{"version": "1.5.7", "notes": "自动发布 v1.5.7", "url": "https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip"}
+{"version":"1.5.8","notes":"性能优化：app.js defer 加载消除渲染阻塞、静态资源长缓存(immutable)、未登录首页可缓存（配合 CF 规则登录页秒开）","url":"https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip"}
