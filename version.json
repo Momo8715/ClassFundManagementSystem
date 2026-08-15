@@ -1,1 +1,1 @@
-{"version":"1.5.7","notes":"修复 13 项安全与数据一致性问题：班委越权修复（只能创建同学账号）、班级级配置全局共享（system_meta）、登录接口限POST、欠费导出判定与缴费页一致、升级备份排除修复、全新安装清理全部表、用户重名防护、旧记录按ID编辑、孤儿凭证图自动清理等","url":"https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip"}
+{"version": "1.5.7", "notes": "自动发布 v1.5.7", "url": "https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip"}
