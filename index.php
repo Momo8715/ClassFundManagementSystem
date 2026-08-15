@@ -4,10 +4,6 @@
  */
 require_once __DIR__ . '/config.php';
 
-// 禁止缓存（防止 CloudFlare 缓存导致主题不更新）
-header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-header('Pragma: no-cache');
-
 // 未安装时跳转安装向导
 if (!isDbInstalled()) {
     if (strpos($_SERVER['SCRIPT_NAME'], 'install.php') === false) {
@@ -23,6 +19,15 @@ if (session_status() === PHP_SESSION_NONE && !empty($_COOKIE[session_name()])) {
     startSession();
 }
 $loggedIn = isset($_SESSION['user_id']);
+
+// 缓存策略：未登录访客的登录页输出可缓存头（配合 Cloudflare 缓存规则，访客打开即秒开）；
+// 已登录/访客会话用户输出 no-store，且请求带 PHPSESSID Cookie，由 CF 规则自动绕过缓存，数据保持实时
+if ($loggedIn) {
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+} else {
+    header('Cache-Control: public, max-age=7200, s-maxage=7200');
+}
 
 // 确保 CSRF token 已生成（兼容旧 session）
 if ($loggedIn) generateCsrfToken();
@@ -441,14 +446,17 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=11" data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=13" defer data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">
         document.getElementById('loadingHint').style.display = 'none';
         document.getElementById('loginScreen').style.display = 'none';
         document.querySelector('.app').classList.add('active');
-        window.switchPage && window.switchPage('dashboard');
+        // app.js 为 defer 加载：DOMContentLoaded 时 window.switchPage 已导出
+        window.addEventListener('DOMContentLoaded', function () {
+            window.switchPage && window.switchPage('dashboard');
+        });
     </script>
     <?php endif; ?>
 </body>
