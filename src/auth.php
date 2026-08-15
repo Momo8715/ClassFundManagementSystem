@@ -10,13 +10,13 @@ function handleLogin() {
     $username = trim($input['username'] ?? '');
     $password = $input['password'] ?? $input['pwd'] ?? '';
 
+    // 速率限制：每 IP 每分钟最多 5 次登录尝试（先于任何校验，空请求同样消耗配额，防止探测）
+    requireRateLimit('login', 5, 60);
+
     if (empty($username) || empty($password)) {
         addLoginHistory(0, $username ?: '(空)', 'password', false, '用户名或密码为空', $input['fingerprint'] ?? '');
         jsonOutput(['error' => '请输入用户名和密码'], 400);
     }
-
-    // 速率限制：每 IP 每分钟最多 5 次登录尝试
-    requireRateLimit('login', 5, 60);
 
     try {
         $stmt = db()->prepare("SELECT * FROM users WHERE username = :u LIMIT 1");

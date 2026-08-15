@@ -69,6 +69,7 @@ function handleTransactionsGet() {
     $type   = $_GET['type'] ?? '';
     $month  = $_GET['month'] ?? '';
     $search = trim($_GET['search'] ?? '');
+    $id     = intval($_GET['id'] ?? 0);
     $page   = max(1, intval($_GET['page'] ?? 1));
     $perPage = min(1000, max(10, intval($_GET['per_page'] ?? 50)));
 
@@ -76,6 +77,13 @@ function handleTransactionsGet() {
     $countSql = "SELECT COUNT(*) FROM transactions t WHERE t.deleted_at IS NULL";
     $params = [];
 
+    if ($id > 0) {
+        // 按 ID 查询单条记录（编辑弹窗用），避免前端拉取大量记录后再查找导致旧记录无法编辑
+        $where = " AND t.id = :tid";
+        $sql .= $where;
+        $countSql .= $where;
+        $params[':tid'] = $id;
+    }
     if ($type && in_array($type, ['income', 'expense'])) {
         $where = " AND t.type = :type";
         $sql .= $where;

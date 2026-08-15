@@ -51,6 +51,7 @@ function handleRoster(string $method) {
             $oldStmt = db()->prepare("SELECT name FROM class_roster WHERE id=:id");
             $oldStmt->execute([':id' => $id]);
             $old = $oldStmt->fetch();
+            if (!$old) jsonOutput(['error' => '学生不存在'], 404);
 
             db()->prepare("DELETE FROM class_roster WHERE id=:id")->execute([':id' => $id]);
 
@@ -137,9 +138,10 @@ function handleExpectedPayment(string $method) {
     switch ($method) {
         case 'GET':
             $roster = db()->query("SELECT * FROM class_roster ORDER BY id")->fetchAll();
+            $pp = getMeta('per_person');
             jsonOutput([
                 'roster'     => $roster,
-                'per_person' => $_SESSION['per_person'] ?? null
+                'per_person' => $pp !== '' ? (float)$pp : null
             ]);
             break;
 
@@ -150,7 +152,8 @@ function handleExpectedPayment(string $method) {
             $input = jsonInput();
 
             if (isset($input['per_person'])) {
-                $_SESSION['per_person'] = sanitizeAmount($input['per_person']);
+                // 班级全局配置：存入 system_meta，所有登录用户共享同一份
+                setMeta('per_person', (string)sanitizeAmount($input['per_person']));
             }
             if (isset($input['exempt_id'])) {
                 db()->prepare("UPDATE class_roster SET exempt=:e WHERE id=:id")
@@ -195,8 +198,8 @@ function handlePayments() {
     $nonExempt = array_filter($roster, function ($s) { return !$s['exempt']; });
     $nonExemptCount = count($nonExempt);
 
-    // 获取每人应缴金额（session → 交易推算 → 0）
-    $perPerson = round(floatval($_SESSION['per_person'] ?? 0), 2);
+    // 获取每人应缴金额（system_meta 全局配置 → 交易推算 → 0）
+    $perPerson = round((float)getMeta('per_person', '0'), 2);
     if ($perPerson <= 0 && $nonExemptCount > 0) {
         // 回退1：从最新班费收缴交易的 expected_amount 推算
         $stmt = db()->query("SELECT expected_amount FROM transactions WHERE type='income' AND sub_category='班费收缴' AND expected_amount IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
@@ -225,9 +228,9 @@ function handlePayments() {
             }
         }
     }
-    // 同步到 session 避免下次重新推算
-    if ($perPerson > 0 && empty($_SESSION['per_person'])) {
-        $_SESSION['per_person'] = $perPerson;
+    // 推算结果同步到全局配置，避免下次重复推算
+    if ($perPerson > 0 && getMeta('per_person') === '') {
+        setMeta('per_person', (string)$perPerson);
     }
     $totalExpected = round($perPerson * $nonExemptCount, 2);
 
@@ -339,10 +342,24 @@ function handleExportUnpaid() {
         }
     }
 
+    // 与缴费页 handlePayments 的判定保持一致：未缴清（含部分缴费）也应列入欠费名单
+    $perPerson = round((float)getMeta('per_person', '0'), 2);
+    if ($perPerson <= 0 && $nonExemptCount > 0) {
+        // 回退：从最新班费收缴交易的 expected_amount 推算每人应缴
+        $stmt = db()->query("SELECT expected_amount FROM transactions WHERE type='income' AND sub_category='班费收缴' AND expected_amount IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+        $last = $stmt->fetch();
+        if ($last) $perPerson = round(floatval($last['expected_amount']) / $nonExemptCount, 2);
+    }
+
     $rows = [];
     foreach ($ps as $info) {
         if ($info['exempt']) continue; // 跳过免缴学生
-        if ($info['paid'] <= 0) $rows[] = [$info['name'], '未缴纳', '0'];
+        if ($perPerson > 0) {
+            // 已缴清阈值与 handlePayments 一致（0.99 容差），未缴清（含部分缴费）列入名单
+            if ($info['paid'] < $perPerson * 0.99) $rows[] = [$info['name'], '未缴清', number_format($info['paid'], 2, '.', '')];
+        } elseif ($info['paid'] <= 0) {
+            $rows[] = [$info['name'], '未缴纳', '0'];
+        }
     }
     if (empty($rows)) $rows[] = ['全部已缴纳', '', ''];
 

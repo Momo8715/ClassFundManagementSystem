@@ -118,7 +118,11 @@ if ($step === 1 && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $already = $db->query("SHOW TABLES LIKE 'users'")->rowCount() > 0;
 
         if ($already && $forceReinstall) {
-            // 全新安装：先删旧表
+            // 全新安装：删除全部 8 张表（含花名册/学期/凭证图/元数据，确保旧数据彻底清除）
+            $db->exec("DROP TABLE IF EXISTS tx_images");
+            $db->exec("DROP TABLE IF EXISTS system_meta");
+            $db->exec("DROP TABLE IF EXISTS semesters");
+            $db->exec("DROP TABLE IF EXISTS class_roster");
             $db->exec("DROP TABLE IF EXISTS login_history");
             $db->exec("DROP TABLE IF EXISTS operation_logs");
             $db->exec("DROP TABLE IF EXISTS transactions");
@@ -164,12 +168,13 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([':u' => $adminName, ':p' => $hash, ':r' => '["head_teacher","admin"]']);
             $adminId = (int)$db->lastInsertId();
 
-            // 导入学生
+            // 导入学生（INSERT IGNORE：与管理员/同学重名的行自动跳过，避免唯一约束导致整个安装失败）
             $names = preg_split('/[\r\n]+/', $studentNames);
+            $stmtStudent = $db->prepare("INSERT IGNORE INTO users (username, password, roles) VALUES (:u, :p, :r)");
             foreach ($names as $name) {
                 $name = trim($name);
                 if (empty($name)) continue;
-                $stmt->execute([':u' => $name, ':p' => password_hash('123456', PASSWORD_BCRYPT), ':r' => '["student"]']);
+                $stmtStudent->execute([':u' => $name, ':p' => password_hash('123456', PASSWORD_BCRYPT), ':r' => '["student"]']);
             }
 
             // 初始结余

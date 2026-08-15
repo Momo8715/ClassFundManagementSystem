@@ -78,9 +78,10 @@ function handleUsersPost() {
     $roles = array_values(array_intersect($roles, ['head_teacher', 'admin', 'monitor', 'vice_monitor', 'finance', 'student']));
     if (empty($roles)) $roles = ['student'];
 
-    // 非管理员不能创建管理员角色
+    // 非管理员（班主任/管理员）只能创建普通「同学」账号，
+    // 防止班长/副班长越权任命班长、副班长、财务委员等高权限角色
     if (!hasPermission('manageAllAccounts')) {
-        $roles = array_values(array_diff($roles, ['head_teacher', 'admin']));
+        $roles = array_values(array_intersect($roles, ['student']));
         if (empty($roles)) $roles = ['student'];
     }
 
@@ -123,6 +124,11 @@ function handleUsersPut() {
 
     if ($id <= 0 || empty($username)) jsonOutput(['error' => '无效参数'], 400);
     if (mb_strlen($username) > 50) jsonOutput(['error' => '姓名不能超过 50 个字符'], 400);
+
+    // 用户名唯一性检查（排除自身），防止改名冲突触发数据库唯一约束异常
+    $dup = db()->prepare("SELECT id FROM users WHERE username = :u AND id <> :id");
+    $dup->execute([':u' => $username, ':id' => $id]);
+    if ($dup->fetch()) jsonOutput(['error' => '该姓名已被其他用户使用'], 409);
 
     // 不能降级自己的管理员权限
     if ($id == currentUser()['id'] && $hasRoles && !in_array('admin', $roles)) {
@@ -212,13 +218,12 @@ function handleBanUser() {
 
 // ==================== 班级信息 ====================
 function handleClassInfo(string $method) {
-    startSession();
-
     if ($method === 'GET') {
         requireLogin();
+        // 班级信息为班级全局配置，存 system_meta 表，所有用户共享
         $info = [
-            'name'     => $_SESSION['class_name'] ?? '',
-            'semester' => $_SESSION['class_semester'] ?? '',
+            'name'     => getMeta('class_name'),
+            'semester' => getMeta('class_semester'),
         ];
         jsonOutput(['classInfo' => $info]);
     }
@@ -227,8 +232,8 @@ function handleClassInfo(string $method) {
         requirePermission('manageAllAccounts');
         requireCsrfToken();
         $input = jsonInput();
-        $_SESSION['class_name']     = trim($input['name'] ?? '');
-        $_SESSION['class_semester'] = trim($input['semester'] ?? '');
+        setMeta('class_name', trim($input['name'] ?? ''));
+        setMeta('class_semester', trim($input['semester'] ?? ''));
         jsonOutput(['ok' => true]);
     }
 }

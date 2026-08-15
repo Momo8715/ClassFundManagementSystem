@@ -551,8 +551,8 @@
     }
 
     async function editTx(id) {
-        var d = await api('transactions', { per_page: 200 });
-        var t = (d.transactions || []).find(function (x) { return x.id == id; });
+        var d = await api('transactions', { id: id, per_page: 1 });
+        var t = (d.transactions || [])[0];
         if (!t) return toast('记录不存在', 'error');
         document.getElementById('modalTxTitle').textContent = '编辑收支';
         document.getElementById('txId').value = t.id;

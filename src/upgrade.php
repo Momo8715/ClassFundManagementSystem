@@ -2,6 +2,15 @@
 /**
  * 班级班费管理系统 - 远程升级模块
  */
+
+/** 国内可访问的 GitHub 代理前缀（ghfast.top 已在服务器实测可用；GitHub 直连国内不通） */
+function githubProxy(string $url): string {
+    if (strpos($url, 'https://github.com/') === 0 || strpos($url, 'https://raw.githubusercontent.com/') === 0) {
+        return 'https://ghfast.top/' . $url;
+    }
+    return $url;
+}
+
 function handleUpgrade(string $method) {
     requirePermission('viewSecurity');
 
@@ -19,7 +28,7 @@ function handleUpgrade(string $method) {
 
 /** 检查远程版本 */
 function checkUpdate() {
-    $remoteUrl = 'https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json';
+    $remoteUrl = githubProxy('https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json');
     $local = json_decode(file_get_contents(__DIR__ . '/../version.json'), true);
     $currentVersion = $local['version'] ?? '0.0.0';
 
@@ -52,7 +61,7 @@ function doUpgrade() {
     set_time_limit(120);
 
     // 先从远程获取版本信息和下载地址
-    $remoteUrl = 'https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json';
+    $remoteUrl = githubProxy('https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json');
     $ctx = stream_context_create(['http' => ['timeout' => 10]]);
     $json = @file_get_contents($remoteUrl, false, $ctx);
     if (!$json) jsonOutput(['error' => '无法连接远程更新服务器'], 503);
@@ -67,7 +76,7 @@ function doUpgrade() {
         jsonOutput(['error' => '当前已是最新版本（' . $currentVersion . '），无需升级'], 400);
     }
 
-    $zipUrl = $remote['url'] ?? '';
+    $zipUrl = githubProxy($remote['url'] ?? '');
     if (empty($zipUrl)) jsonOutput(['error' => '远程未配置升级包地址'], 400);
 
     // 下载 ZIP
@@ -159,13 +168,15 @@ function backupFiles(string $src, string $dst, array $exclude): int {
         $srcPath = $src . '/' . $item;
         $dstPath = $dst . '/' . $item;
 
-        // 跳过排除的顶级目录
+        // 跳过排除的顶级目录/文件：精确匹配、目录前缀匹配、以及 'backup_' 这类前缀名
         $relPath = str_replace(realpath(__DIR__ . '/..') . '/', '', $srcPath);
         $skip = false;
         foreach ($exclude as $ex) {
-            if (strpos($relPath, $ex . '/') === 0 || $relPath === $ex) {
-                $skip = true; break;
-            }
+            if ($relPath === $ex) { $skip = true; break; }
+            if (strpos($relPath, $ex . '/') === 0) { $skip = true; break; }
+            // 前缀型排除项（以 '_' 结尾，如 'backup_'）：匹配所有以该前缀开头的路径，
+            // 避免旧备份目录被递归复制进新备份导致体积膨胀
+            if (str_ends_with($ex, '_') && str_starts_with($relPath, $ex)) { $skip = true; break; }
         }
         if ($skip) continue;
 

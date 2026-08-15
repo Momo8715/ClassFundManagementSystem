@@ -100,6 +100,13 @@ function handleUploadImage() {
         jsonOutput(['error' => '没有上传文件'], 400);
     }
 
+    // 清理孤儿凭证图：上传后超过 24 小时仍未关联收支记录（transaction_id=0）的图片
+    try {
+        db()->exec("DELETE FROM tx_images WHERE transaction_id = 0 AND created_at < (NOW() - INTERVAL 24 HOUR)");
+    } catch (\Exception $e) {
+        // 清理失败不影响本次上传
+    }
+
     $file = $_FILES['image'];
 
     // 使用真实 MIME 检测（修复：之前仅检查扩展名）

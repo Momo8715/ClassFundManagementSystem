@@ -42,6 +42,7 @@ $actionMethods = [
     'recycle_bin' => ['GET', 'PUT', 'DELETE'],
     'expected_payment' => ['GET', 'POST'],
     'classInfo' => ['GET', 'PUT'],
+    'login' => ['POST'],
     'guest_login' => ['POST'],
     'logout' => ['POST'],
     'change_password' => ['POST'],

@@ -299,6 +299,27 @@ function db(): PDO {
     return $pdo;
 }
 
+// ========== 系统级配置（system_meta 表，班级全局共享） ==========
+
+/** 读取系统级配置（替代旧版存 session：per_person / class_name / class_semester 等全局值） */
+function getMeta(string $key, string $default = ''): string {
+    try {
+        $stmt = db()->prepare("SELECT meta_value FROM system_meta WHERE meta_key = :k");
+        $stmt->execute([':k' => $key]);
+        $v = $stmt->fetchColumn();
+        return $v === false ? $default : (string)$v;
+    } catch (\Exception $e) {
+        return $default;
+    }
+}
+
+/** 写入系统级配置（system_meta 表，所有登录用户共享同一份） */
+function setMeta(string $key, string $value): void {
+    db()->prepare("INSERT INTO system_meta (meta_key, meta_value) VALUES (:k, :v)
+        ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)")
+        ->execute([':k' => $key, ':v' => $value]);
+}
+
 // ========== 会话管理 ==========
 function startSession() {
     if (session_status() === PHP_SESSION_NONE) {
@@ -387,14 +408,17 @@ function requirePermission(string $action) {
 // ========== 输入/输出 ==========
 function jsonInput(): array {
     // 合并 $_POST, $_GET, php://input（兼容各种请求方式）
-    if (!empty($_POST)) return $_POST;
-    $raw = file_get_contents('php://input');
-    $data = json_decode($raw, true) ?: [];
-    // PUT/DELETE 的 URL-encoded body 回退
-    if (empty($data) && !empty($raw)) {
-        parse_str($raw, $data);
+    // 修复：$_POST 非空时也合并 $_GET，避免 URL 上的参数被丢弃（body 优先，GET 补充缺失键）
+    $data = $_POST;
+    if (empty($data)) {
+        $raw = file_get_contents('php://input');
+        $data = json_decode($raw, true) ?: [];
+        // PUT/DELETE 的 URL-encoded body 回退
+        if (empty($data) && !empty($raw)) {
+            parse_str($raw, $data);
+        }
     }
-    if (!empty($_GET)) $data = array_merge($data, $_GET);
+    if (!empty($_GET)) $data = array_merge($_GET, $data);
     return $data;
 }
 
