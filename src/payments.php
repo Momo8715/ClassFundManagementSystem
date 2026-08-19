@@ -238,20 +238,35 @@ function handlePayments() {
     foreach ($txs as $tx) {
         $totalCollected += $tx['amount'];
         $pids = json_decode($tx['payer_ids'] ?? '', true) ?: [];
+        $exids = json_decode($tx['exempt_ids'] ?? '', true) ?: [];  // 单次免缴（v1.6）
         $roundPaid = [];
         $roundUnpaid = [];
+        $roundExempt = [];
+
+        foreach ($exids as $exid) {
+            if (isset($ps[$exid])) $roundExempt[] = ['name' => $ps[$exid]['name'], 'amount' => 0];
+        }
 
         if ($tx['payer_ids'] === 'all') {
-            if ($nonExemptCount > 0) {
-                $perPersonThisRound = round($tx['amount'] / $nonExemptCount, 2);
+            // 全班缴纳：排除永久免缴 + 单次免缴后平分
+            $eligibleCount = 0;
+            foreach ($roster as $s) {
+                if ($s['exempt']) continue;
+                if (in_array($s['id'], $exids)) continue;
+                $eligibleCount++;
+            }
+            if ($eligibleCount > 0) {
+                $perPersonThisRound = round($tx['amount'] / $eligibleCount, 2);
                 foreach ($roster as $s) {
                     if ($s['exempt']) continue;
+                    if (in_array($s['id'], $exids)) continue;
                     $ps[$s['id']]['paid'] += $perPersonThisRound;
                     $roundPaid[] = ['name' => $s['name'], 'amount' => $perPersonThisRound];
                 }
             }
             foreach ($roster as $s) {
                 if ($s['exempt']) continue;
+                if (in_array($s['id'], $exids)) continue;
                 $found = false;
                 foreach ($roundPaid as $rp) if ($rp['name'] === $s['name']) $found = true;
                 if (!$found) $roundUnpaid[] = ['name' => $s['name'], 'amount' => 0];
@@ -265,10 +280,14 @@ function handlePayments() {
                 }
             }
             foreach ($nonExempt as $s) {
+                if (in_array($s['id'], $exids)) continue;  // 单次免缴不计入未缴
                 if (!in_array($s['id'], $pids)) $roundUnpaid[] = ['name' => $s['name'], 'amount' => 0];
             }
         } else {
-            foreach ($nonExempt as $s) $roundUnpaid[] = ['name' => $s['name'], 'amount' => 0];
+            foreach ($nonExempt as $s) {
+                if (in_array($s['id'], $exids)) continue;
+                $roundUnpaid[] = ['name' => $s['name'], 'amount' => 0];
+            }
         }
 
         $rounds[] = [
@@ -278,16 +297,23 @@ function handlePayments() {
             'amount'        => round((float)$tx['amount'], 2),
             'paid_list'     => $roundPaid,
             'unpaid_list'   => $roundUnpaid,
+            'exempt_list'   => $roundExempt,
             'paid_count'    => count($roundPaid),
             'unpaid_count'  => count($roundUnpaid),
+            'exempt_count'  => count($roundExempt),
         ];
     }
 
-    // 分类已缴/未缴
+    // 分类已缴/未缴：最近一轮单次免缴的学生不计入未缴（本轮不催缴）
+    $lastExempt = [];
+    if (!empty($txs)) {
+        $lastExempt = json_decode($txs[0]['exempt_ids'] ?? '', true) ?: [];
+    }
     $paid = [];
     $unpaid = [];
     foreach ($ps as $sid => $info) {
         if ($info['exempt']) continue;
+        if (in_array($sid, $lastExempt)) continue;
         if ($perPerson > 0 && $info['paid'] >= $perPerson * 0.99) {
             $paid[] = $info;
         } elseif ($perPerson > 0) {
@@ -327,12 +353,20 @@ function handleExportUnpaid() {
     $txs = db()->query("SELECT * FROM transactions WHERE type='income' AND sub_category='班费收缴' AND deleted_at IS NULL ORDER BY date DESC")->fetchAll();
     foreach ($txs as $tx) {
         $pids = json_decode($tx['payer_ids'] ?? '', true) ?: [];
+        $exids = json_decode($tx['exempt_ids'] ?? '', true) ?: [];  // 单次免缴（v1.6）
         if ($tx['payer_ids'] === 'all') {
-            // 与 handlePayments 一致：排除免缴学生后平分
-            if ($nonExemptCount > 0) {
-                $each = round($tx['amount'] / $nonExemptCount, 2);
+            // 与 handlePayments 一致：排除永久免缴 + 单次免缴后平分
+            $eligibleCount = 0;
+            foreach ($roster as $s) {
+                if ($s['exempt']) continue;
+                if (in_array($s['id'], $exids)) continue;
+                $eligibleCount++;
+            }
+            if ($eligibleCount > 0) {
+                $each = round($tx['amount'] / $eligibleCount, 2);
                 foreach ($roster as $s) {
                     if ($s['exempt']) continue;
+                    if (in_array($s['id'], $exids)) continue;
                     $ps[$s['id']]['paid'] += $each;
                 }
             }
@@ -351,9 +385,16 @@ function handleExportUnpaid() {
         if ($last) $perPerson = round(floatval($last['expected_amount']) / $nonExemptCount, 2);
     }
 
+    // 最近一轮单次免缴的学生：不计入欠费名单（本轮不催缴）
+    $lastExemptIds = [];
+    if (!empty($txs)) {
+        $lastExemptIds = json_decode($txs[0]['exempt_ids'] ?? '', true) ?: [];
+    }
+
     $rows = [];
-    foreach ($ps as $info) {
-        if ($info['exempt']) continue; // 跳过免缴学生
+    foreach ($ps as $sid => $info) {
+        if ($info['exempt']) continue; // 跳过永久免缴学生
+        if (in_array($sid, $lastExemptIds)) continue; // 跳过本轮单次免缴学生
         if ($perPerson > 0) {
             // 已缴清阈值与 handlePayments 一致（0.99 容差），未缴清（含部分缴费）列入名单
             if ($info['paid'] < $perPerson * 0.99) $rows[] = [$info['name'], '未缴清', number_format($info['paid'], 2, '.', '')];

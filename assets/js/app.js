@@ -28,6 +28,7 @@
     var xlsxPreviewData = [];
     var txPage = 1;
     var txImageList = [];
+    var txExemptIds = [];
 
     // ========== 工具函数 ==========
 
@@ -324,8 +325,8 @@
             if (list.length === 0) {
                 html = '<div class="empty"><div class="icon">📭</div>暂无记录</div>';
             } else {
-                html = '<table><thead><tr>' + (cd ? '<th style="width:28px"><input type="checkbox" onclick="window._toggleAllTx(this)"></th>' : '') + '<th>ID</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th>分类</th><th>凭证</th><th>记录人</th>' + (ce || cd ? '<th>操作</th>' : '') + '</tr></thead><tbody>';
-                list.forEach(function (t) {
+                html = '<table><thead><tr>' + (cd ? '<th style="width:28px"><input type="checkbox" onclick="window._toggleAllTx(this)"></th>' : '') + '<th>序号</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th>分类</th><th>凭证</th><th>记录人</th>' + (ce || cd ? '<th>操作</th>' : '') + '</tr></thead><tbody>';
+                list.forEach(function (t, i) {
                     var imgs = [];
                     // v1.5.6：优先数据库凭证图（缩略图加载）
                     if (t.image_ids) { try { var iids = typeof t.image_ids === 'string' ? JSON.parse(t.image_ids) : t.image_ids; if (Array.isArray(iids)) imgs = iids.filter(Boolean); } catch (e) {} }
@@ -334,7 +335,7 @@
                         if (!imgs.length && t.image_path) imgs = [t.image_path];
                     }
                     var imgCell = imgs.length ? '<td>' + imgs.map(function (p) { return '<a href="' + escapeHtml(imgUrl(p, false)) + '" target="_blank" title="查看原图"><img src="' + escapeHtml(imgUrl(p, true)) + '" style="width:30px;height:24px;object-fit:cover;border-radius:4px;margin-right:2px;border:1px solid var(--border)" loading="lazy"></a>'; }).join('') + '</td>' : '<td style="color:var(--text-secondary)">-</td>';
-                    html += '<tr>' + (cd ? '<td><input type="checkbox" class="txCb" value="' + t.id + '"></td>' : '') + '<td>#' + t.id + '</td><td>' + escapeHtml(t.date) + '</td><td><span class="badge badge-' + (t.type === 'income' ? 'income' : 'expense') + '">' + (t.type === 'income' ? '收入' : '支出') + '</span></td>' +
+                    html += '<tr>' + (cd ? '<td><input type="checkbox" class="txCb" value="' + t.id + '"></td>' : '') + '<td>' + (d.total - ((page - 1) * 20 + i)) + '</td><td>' + escapeHtml(t.date) + '</td><td><span class="badge badge-' + (t.type === 'income' ? 'income' : 'expense') + '">' + (t.type === 'income' ? '收入' : '支出') + '</span></td>' +
                         '<td style="font-weight:700;color:' + (t.type === 'income' ? 'var(--success)' : 'var(--danger)') + '">' + (t.type === 'income' ? '+' : '-') + '¥' + Number(t.amount).toFixed(2) + '</td>' +
                         '<td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.category) + '</td>' + imgCell + '<td>' + escapeHtml(t.recorder_name || '未知') + '</td>';
                     if (ce || cd) { html += '<td style="white-space:nowrap">' + '<button class="btn btn-outline btn-sm" onclick="window._receipt(' + t.id + ')" title="收据">🧾</button> ' + (ce ? '<button class="btn btn-outline btn-sm" onclick="window._editTx(' + t.id + ')">✏️</button>' : '') + (cd ? '<button class="btn btn-danger btn-sm" onclick="window._deleteTx(' + t.id + ')" style="margin-left:4px">🗑️</button>' : '') + '</td>'; }
@@ -543,6 +544,7 @@
         document.getElementById('txSourceInfo').value = '';
         document.getElementById('txImageFile').value = '';
         txImageList = [];
+        txExemptIds = [];
         renderTxImagePreview();
         document.getElementById('txPayerIds').value = '';
         document.getElementById('txExpected').value = '';
@@ -581,9 +583,12 @@
         document.getElementById('txPerPersonGroup').style.display = (subVal === '班费收缴' ? 'block' : 'none');
         if (subVal === '班费收缴') {
             await loadRosterForTx();
+            txExemptIds = [];
+            if (t.exempt_ids) { try { var eids = typeof t.exempt_ids === 'string' ? JSON.parse(t.exempt_ids) : t.exempt_ids; if (Array.isArray(eids)) txExemptIds = eids.filter(Boolean).map(Number); } catch (e) {} }
             var pids = t.payer_ids;
-            if (pids === 'all') { document.querySelectorAll('.rosterCb').forEach(function (cb) { cb.checked = true; }); }
+            if (pids === 'all') { document.querySelectorAll('.rosterCb:not(:disabled)').forEach(function (cb) { cb.checked = true; }); }
             else if (pids) { var arr = typeof pids === 'string' ? JSON.parse(pids) : pids; if (Array.isArray(arr)) { document.querySelectorAll('.rosterCb').forEach(function (cb) { cb.checked = arr.includes(parseInt(cb.value)); }); } }
+            _refreshRosterRows();
             // 回填每人应缴
             var pp = '';
             if (pids && pids !== 'all') {
@@ -612,11 +617,42 @@
     function calcExpected() { var p = parseFloat(document.getElementById('txPerPerson').value) || 0, c = document.querySelectorAll('.rosterCb').length || 1; document.getElementById('txExpected').value = (p * c).toFixed(2); }
 
     async function loadRosterForTx() {
-        try { var d = await api('roster'); var list = d.roster || []; document.getElementById('txRosterList').innerHTML = list.map(function (s) { return '<label style="display:flex;align-items:center;gap:4px;font-size:12px;padding:2px 0"><input type="checkbox" value="' + s.id + '" class="rosterCb"> ' + escapeHtml(s.name) + '</label>'; }).join('') || '<span style="font-size:11px;color:var(--text-secondary)">花名册为空，请先导入</span>'; } catch (e) {}
+        try { var d = await api('roster'); var list = d.roster || []; document.getElementById('txRosterList').innerHTML = list.map(function (s) { return '<label class="rosterRow" data-id="' + s.id + '" style="display:flex;align-items:center;gap:4px;font-size:12px;padding:2px 0"><input type="checkbox" value="' + s.id + '" class="rosterCb" onchange="window._onRosterCb(this)"' + (s.exempt ? ' disabled' : '') + '> <span class="rosterName">' + escapeHtml(s.name) + '</span>' + (s.exempt ? '<span style="font-size:10px;color:var(--text-secondary)">(永久免缴)</span>' : '') + '<button type="button" class="btn-exempt-toggle" style="margin-left:auto;font-size:10px;padding:1px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer"' + (s.exempt ? ' disabled' : '') + ' onclick="window._toggleTxExempt(' + s.id + ')">⏭️免缴</button></label>'; }).join('') || '<span style="font-size:11px;color:var(--text-secondary)">花名册为空，请先导入</span>'; } catch (e) {}
     }
 
-    function selectAllRoster() { document.querySelectorAll('.rosterCb').forEach(function (cb) { cb.checked = true; }); }
-    function clearRoster() { document.querySelectorAll('.rosterCb').forEach(function (cb) { cb.checked = false; }); }
+    function _refreshRosterRows() {
+        document.querySelectorAll('.rosterRow').forEach(function (row) {
+            var id = parseInt(row.getAttribute('data-id'), 10);
+            var isEx = txExemptIds.indexOf(id) !== -1;
+            var cb = row.querySelector('.rosterCb');
+            var btn = row.querySelector('.btn-exempt-toggle');
+            if (cb) { if (isEx) cb.checked = false; cb.disabled = isEx; }
+            row.style.opacity = isEx ? '0.55' : '1';
+            if (btn) { btn.textContent = isEx ? '↩️撤销免缴' : '⏭️免缴'; }
+        });
+    }
+
+    function _toggleTxExempt(id) {
+        var idx = txExemptIds.indexOf(id);
+        if (idx !== -1) { txExemptIds.splice(idx, 1); }
+        else {
+            txExemptIds.push(id);
+            document.querySelectorAll('.rosterCb').forEach(function (cb) { if (parseInt(cb.value, 10) === id) cb.checked = false; });
+        }
+        _refreshRosterRows();
+    }
+
+    function _onRosterCb(el) {
+        if (el.checked) {
+            var id = parseInt(el.value, 10);
+            var idx = txExemptIds.indexOf(id);
+            if (idx !== -1) txExemptIds.splice(idx, 1);
+            _refreshRosterRows();
+        }
+    }
+
+    function selectAllRoster() { txExemptIds = []; document.querySelectorAll('.rosterCb:not(:disabled)').forEach(function (cb) { cb.checked = true; }); _refreshRosterRows(); }
+    function clearRoster() { txExemptIds = []; document.querySelectorAll('.rosterCb').forEach(function (cb) { cb.checked = false; }); _refreshRosterRows(); }
 
     async function saveTransaction() {
         var id = document.getElementById('txId').value;
@@ -626,8 +662,8 @@
         // v1.5.6：数字 = 数据库图ID（image_ids），字符串 = 旧版文件路径（images/image_path 兼容）
         var imgIds = txImageList.filter(function (x) { return typeof x === 'number'; });
         var imgPaths = txImageList.filter(function (x) { return typeof x !== 'number'; });
-        var payload = { type: document.getElementById('txType').value, sub_category: subCat, source_info: subCat === '其他来源' ? srcInfo : '', amount: parseFloat(document.getElementById('txAmount').value), date: document.getElementById('txDate').value, description: document.getElementById('txDesc').value.trim(), category: document.getElementById('txCategory').value, image_ids: imgIds, images: imgPaths, image_path: imgPaths.length ? imgPaths[0] : '', expected_amount: document.getElementById('txExpected').value || null };
-        if (subCat === '班费收缴') { var cbs = document.querySelectorAll('.rosterCb:checked'); if (cbs.length === document.querySelectorAll('.rosterCb').length) payload.payer_ids = 'all'; else if (cbs.length > 0) payload.payer_ids = JSON.stringify(Array.from(cbs).map(function (cb) { return parseInt(cb.value); })); }
+        var payload = { type: document.getElementById('txType').value, sub_category: subCat, source_info: subCat === '其他来源' ? srcInfo : '', amount: parseFloat(document.getElementById('txAmount').value), date: document.getElementById('txDate').value, description: document.getElementById('txDesc').value.trim(), category: document.getElementById('txCategory').value, image_ids: imgIds, images: imgPaths, image_path: imgPaths.length ? imgPaths[0] : '', expected_amount: document.getElementById('txExpected').value || null, exempt_ids: txExemptIds };
+        if (subCat === '班费收缴') { var cbs = document.querySelectorAll('.rosterCb:checked'); if (cbs.length === document.querySelectorAll('.rosterCb:not(:disabled)').length) payload.payer_ids = 'all'; else if (cbs.length > 0) payload.payer_ids = JSON.stringify(Array.from(cbs).map(function (cb) { return parseInt(cb.value); })); }
         if (!payload.amount || payload.amount <= 0) return toast('无效金额', 'error');
         if (!payload.date) return toast('请选择日期', 'error');
         if (!payload.description) return toast('请输入描述', 'error');
@@ -727,7 +763,7 @@
     function deleteRoster(id) { if (!confirm('确定删除？')) return; api('roster&id=' + id, {}, 'DELETE').then(function () { renderRoster(); toast('已删除'); }).catch(function (e) { toast(e.message, 'error'); }); }
 
     // ========== 缴费 ==========
-    async function renderPayments() { try { var r = await Promise.all([api('payments'), api('expected_payment')]); var d = r[0], ep = r[1]; document.getElementById('perPersonAmt').value = ep.per_person || ''; var ro = ep.roster || [], ne = ro.filter(function (s) { return !s.exempt; }), et = (ep.per_person || 0) * ne.length; document.getElementById('paymentSummary').innerHTML = '<div class="card"><div class="card-label">👥 花名册人数</div><div class="card-value" style="color:#6366f1">' + d.roster_count + '</div></div><div class="card"><div class="card-label">💰 总收款</div><div class="card-value income">¥' + d.total_collected.toFixed(2) + '</div></div><div class="card"><div class="card-label">✅ 已缴纳</div><div class="card-value income">' + d.paid_count + '人</div></div><div class="card"><div class="card-label">⚠️ 未缴纳</div><div class="card-value expense">' + d.unpaid_count + '人</div></div><div class="card"><div class="card-label">🎯 应缴总额</div><div class="card-value" style="color:#8b5cf6">¥' + et.toFixed(2) + '</div><div class="card-sub">' + ne.length + '人 × ¥' + (ep.per_person || 0) + '</div></div>'; var ph = ''; if (d.rounds && d.rounds.length) { d.rounds.forEach(function (rd, i) { ph += '<div style="background:var(--bg-card);border-radius:8px;padding:10px 14px;margin-bottom:6px;box-shadow:var(--shadow)"><b>#' + (i + 1) + ' ' + escapeHtml(rd.date) + '</b> ' + escapeHtml(rd.description) + ' <span style="color:var(--success)">¥' + (rd.amount || 0).toFixed(2) + '</span><br><span style="font-size:11px">已缴' + rd.paid_count + '人: ' + rd.paid_list.map(function (p) { return escapeHtml(p.name); }).join('、') + '</span><br><span style="font-size:11px;color:var(--danger)">未缴' + rd.unpaid_count + '人: ' + rd.unpaid_list.map(function (p) { return escapeHtml(p.name); }).join('、') + '</span></div>'; }); } else { ph = '<div class="empty">暂无缴费记录</div>'; } document.getElementById('paidTable').innerHTML = ph; document.getElementById('rosterPayTable').innerHTML = ro.length ? '<table><thead><tr>' + (hasPerm('manageRoster') ? '<th style="width:28px"><input type="checkbox" onclick="window._toggleAllRoster(this)"></th>' : '') + '<th>姓名</th><th>状态</th>' + (hasPerm('manageRoster') ? '<th>操作</th>' : '') + '</tr></thead><tbody>' + ro.map(function (s) { return '<tr>' + (hasPerm('manageRoster') ? '<td><input type="checkbox" class="rosterPayCb" value="' + s.id + '"></td>' : '') + '<td>' + escapeHtml(s.name) + '</td><td>' + (s.exempt ? '<span class="badge badge-role">免缴</span>' : '<span class="badge badge-income">应缴</span>') + '</td>' + (hasPerm('manageRoster') ? '<td><button class="btn btn-outline btn-sm" onclick="window._toggleExempt(' + s.id + ',' + (s.exempt ? 1 : 0) + ')">' + (s.exempt ? '设为应缴' : '设为免缴') + '</button></td>' : '') + '</tr>'; }).join('') + '</tbody></table>' : '<div class="empty">花名册为空</div>'; document.getElementById('unpaidTable').innerHTML = d.unpaid_list.length === 0 ? '<div class="empty" style="padding:20px;color:var(--success)">🎉 全部已缴！</div>' : '<table><thead><tr><th>姓名</th><th>状态</th></tr></thead><tbody>' + d.unpaid_list.map(function (p) { return '<tr><td>' + escapeHtml(p.name) + '</td><td><span class="badge badge-expense">未缴纳</span></td></tr>'; }).join('') + '</tbody></table>'; } catch (e) { toast(e.message, 'error'); } }
+    async function renderPayments() { try { var r = await Promise.all([api('payments'), api('expected_payment')]); var d = r[0], ep = r[1]; document.getElementById('perPersonAmt').value = ep.per_person || ''; var ro = ep.roster || [], ne = ro.filter(function (s) { return !s.exempt; }), et = (ep.per_person || 0) * ne.length; document.getElementById('paymentSummary').innerHTML = '<div class="card"><div class="card-label">👥 花名册人数</div><div class="card-value" style="color:#6366f1">' + d.roster_count + '</div></div><div class="card"><div class="card-label">💰 总收款</div><div class="card-value income">¥' + d.total_collected.toFixed(2) + '</div></div><div class="card"><div class="card-label">✅ 已缴纳</div><div class="card-value income">' + d.paid_count + '人</div></div><div class="card"><div class="card-label">⚠️ 未缴纳</div><div class="card-value expense">' + d.unpaid_count + '人</div></div><div class="card"><div class="card-label">🎯 应缴总额</div><div class="card-value" style="color:#8b5cf6">¥' + et.toFixed(2) + '</div><div class="card-sub">' + ne.length + '人 × ¥' + (ep.per_person || 0) + '</div></div>'; var ph = ''; if (d.rounds && d.rounds.length) { d.rounds.forEach(function (rd, i) { ph += '<div style="background:var(--bg-card);border-radius:8px;padding:10px 14px;margin-bottom:6px;box-shadow:var(--shadow)"><b>#' + (d.rounds.length - i) + ' ' + escapeHtml(rd.date) + '</b> ' + escapeHtml(rd.description) + ' <span style="color:var(--success)">¥' + (rd.amount || 0).toFixed(2) + '</span><br><span style="font-size:11px">已缴' + rd.paid_count + '人: ' + rd.paid_list.map(function (p) { return escapeHtml(p.name); }).join('、') + '</span><br><span style="font-size:11px;color:var(--danger)">未缴' + rd.unpaid_count + '人: ' + rd.unpaid_list.map(function (p) { return escapeHtml(p.name); }).join('、') + '</span>' + (rd.exempt_count > 0 ? '<br><span style="font-size:11px;color:var(--text-secondary)">单次免缴' + rd.exempt_count + '人: ' + rd.exempt_list.map(function (p) { return escapeHtml(p.name); }).join('、') + '</span>' : '') + '</div>'; }); } else { ph = '<div class="empty">暂无缴费记录</div>'; } document.getElementById('roundsTable').innerHTML = ph; document.getElementById('rosterPayTable').innerHTML = ro.length ? '<table><thead><tr>' + (hasPerm('manageRoster') ? '<th style="width:28px"><input type="checkbox" onclick="window._toggleAllRoster(this)"></th>' : '') + '<th>姓名</th><th>状态</th>' + (hasPerm('manageRoster') ? '<th>操作</th>' : '') + '</tr></thead><tbody>' + ro.map(function (s) { return '<tr>' + (hasPerm('manageRoster') ? '<td><input type="checkbox" class="rosterPayCb" value="' + s.id + '"></td>' : '') + '<td>' + escapeHtml(s.name) + '</td><td>' + (s.exempt ? '<span class="badge badge-role">免缴</span>' : '<span class="badge badge-income">应缴</span>') + '</td>' + (hasPerm('manageRoster') ? '<td><button class="btn btn-outline btn-sm" onclick="window._toggleExempt(' + s.id + ',' + (s.exempt ? 1 : 0) + ')">' + (s.exempt ? '设为应缴' : '设为免缴') + '</button></td>' : '') + '</tr>'; }).join('') + '</tbody></table>' : '<div class="empty">花名册为空</div>'; document.getElementById('paidTable').innerHTML = d.paid_list.length === 0 ? '<div class="empty" style="padding:20px">暂无已缴记录</div>' : '<table><thead><tr><th>姓名</th><th>已缴金额</th></tr></thead><tbody>' + d.paid_list.map(function (p) { return '<tr><td>' + escapeHtml(p.name) + '</td><td style="color:var(--success)">¥' + Number(p.paid || 0).toFixed(2) + '</td></tr>'; }).join('') + '</tbody></table>'; var perP = Number(ep.per_person || 0); document.getElementById('unpaidTable').innerHTML = d.unpaid_list.length === 0 ? '<div class="empty" style="padding:20px;color:var(--success)">🎉 全部已缴！</div>' : '<table><thead><tr><th>姓名</th><th>欠费金额</th></tr></thead><tbody>' + d.unpaid_list.map(function (p) { var owe = perP > 0 ? Math.max(0, perP - Number(p.paid || 0)) : 0; return '<tr><td>' + escapeHtml(p.name) + '</td><td style="color:var(--danger)">' + (perP > 0 ? '¥' + owe.toFixed(2) : '未缴纳') + '</td></tr>'; }).join('') + '</tbody></table>'; } catch (e) { toast(e.message, 'error'); } }
 
     function _toggleAllTx(el) { var cbs = document.querySelectorAll('.txCb'); for (var i = 0; i < cbs.length; i++) cbs[i].checked = el.checked; }
     function _toggleAllRoster(el) { var cbs = document.querySelectorAll('.rosterPayCb'); for (var i = 0; i < cbs.length; i++) cbs[i].checked = el.checked; }
@@ -759,7 +795,7 @@
     async function toggleRosterExempt(id, ex) { try { await api('expected_payment', { exempt_id: id, exempt: ex ? 0 : 1 }, 'POST'); renderPayments(); } catch (e) { toast(e.message, 'error'); } }
 
     // ========== 回收站 ==========
-    async function renderRecycle() { try { var d = await api('recycle_bin'); var list = d.items || [], html = ''; if (list.length === 0) { html = '<div class="empty">📭 回收站为空</div>'; } else { html = '<table><thead><tr><th>ID</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th>删除时间</th><th>操作</th></tr></thead><tbody>'; list.forEach(function (t) { html += '<tr><td>#' + t.id + '</td><td>' + escapeHtml(t.date) + '</td><td>' + escapeHtml(t.type) + '</td><td>¥' + Number(t.amount || 0).toFixed(2) + '</td><td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.deleted_at) + '</td><td style="white-space:nowrap"><button class="btn btn-success btn-sm" onclick="window._restoreTx(' + t.id + ')">恢复</button><button class="btn btn-danger btn-sm" onclick="window._permDeleteTx(' + t.id + ')" style="margin-left:4px">永久删除</button></td></tr>'; }); html += '</tbody></table>'; } document.getElementById('recycleTable').innerHTML = html; } catch (e) { toast(e.message, 'error'); } }
+    async function renderRecycle() { try { var d = await api('recycle_bin'); var list = d.items || [], html = ''; if (list.length === 0) { html = '<div class="empty">📭 回收站为空</div>'; } else { html = '<table><thead><tr><th>序号</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th>删除时间</th><th>操作</th></tr></thead><tbody>'; list.forEach(function (t, i) { html += '<tr><td>' + (list.length - i) + '</td><td>' + escapeHtml(t.date) + '</td><td>' + escapeHtml(t.type) + '</td><td>¥' + Number(t.amount || 0).toFixed(2) + '</td><td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.deleted_at) + '</td><td style="white-space:nowrap"><button class="btn btn-success btn-sm" onclick="window._restoreTx(' + t.id + ')">恢复</button><button class="btn btn-danger btn-sm" onclick="window._permDeleteTx(' + t.id + ')" style="margin-left:4px">永久删除</button></td></tr>'; }); html += '</tbody></table>'; } document.getElementById('recycleTable').innerHTML = html; } catch (e) { toast(e.message, 'error'); } }
     function restoreTx(id) { api('recycle_bin&id=' + id, {}, 'PUT').then(function () { renderRecycle(); renderTransactions(); renderDashboard(); toast('已恢复'); }).catch(function (e) { toast(e.message, 'error'); }); }
     function permDeleteTx(id) { if (!confirm('⚠️ 永久删除后无法恢复，确定？')) return; api('recycle_bin&id=' + id, {}, 'DELETE').then(function () { renderRecycle(); toast('已永久删除'); }).catch(function (e) { toast(e.message, 'error'); }); }
 
@@ -827,6 +863,7 @@
     window.toggleSidebar = toggleSidebar;
     window.onTxTypeChange = onTxTypeChange; window.calcPerPerson = calcPerPerson; window.calcExpected = calcExpected;
     window.selectAllRoster = selectAllRoster; window.clearRoster = clearRoster;
+    window._toggleTxExempt = _toggleTxExempt; window._onRosterCb = _onRosterCb; window._refreshRosterRows = _refreshRosterRows;
     window.saveTransaction = saveTransaction; window.uploadTxImages = uploadTxImages; window.removeTxImage = removeTxImage;
     window._createSemester = _createSemester; window._archiveSemester = _archiveSemester;
     window._receipt = function (id) { window.open('api.php?action=receipt&id=' + id, '_blank', 'width=820,height=760'); };

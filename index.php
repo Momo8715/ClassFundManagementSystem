@@ -34,6 +34,12 @@ if ($loggedIn) generateCsrfToken();
 
 // 获取权限 JSON 供前端使用
 $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
+
+// 读取版本号（页脚展示），格式化为三段 X.XX.XX
+$verInfo = json_decode(@file_get_contents(__DIR__ . '/version.json'), true);
+$siteVersion = $verInfo['version'] ?? '1.0.0';
+if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
+if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
 ?>
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -446,7 +452,7 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=13" defer data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=17" defer data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">
@@ -459,5 +465,10 @@ $permsJson = defined('PERMISSIONS') ? PERMISSIONS : '{}';
         });
     </script>
     <?php endif; ?>
+
+    <!-- 页脚：版权与版本号 -->
+    <footer style="text-align:center;padding:14px 0 22px;font-size:12px;color:var(--text-secondary);opacity:.75">
+        Momo ©2026｜陌沫　V <?php echo htmlspecialchars($siteVersion); ?>
+    </footer>
 </body>
 </html>

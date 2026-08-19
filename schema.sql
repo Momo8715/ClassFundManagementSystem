@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS `transactions` (
   `date`            DATE NOT NULL,
   `description`     VARCHAR(500) NOT NULL DEFAULT '',
   `payer_ids`       TEXT DEFAULT NULL COMMENT '缴费学生ID(JSON数组或all)',
+  `exempt_ids`      TEXT DEFAULT NULL COMMENT '单次免缴学生ID(JSON数组)',
   `category`        VARCHAR(100) NOT NULL DEFAULT '其他',
   `image_path`      VARCHAR(500) DEFAULT NULL COMMENT '凭证图片路径',
   `images`          TEXT DEFAULT NULL COMMENT '多图凭证(JSON数组)',

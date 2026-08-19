@@ -1,1 +1,1 @@
-{"version": "1.5.8", "notes": "自动发布 v1.5.8", "url": "https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip"}
+{"version":"1.6","notes":"新增单次免缴功能（添加收款时可设置本轮免缴学生）+ 缴费页展示修复 + 收支明细连续序号 + 页脚版权与版本号","url":"https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip"}

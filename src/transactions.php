@@ -33,6 +33,20 @@ function normalizeImageIds($ids): ?string {
     return json_encode($ids, JSON_UNESCAPED_UNICODE);
 }
 
+/** 规范化学生ID列表（数组或JSON字符串 → JSON数组；用于单次免缴 exempt_ids 等） */
+function normalizeIdList($ids): ?string {
+    if ($ids === null || $ids === '' || $ids === '[]') return null;
+    if (is_string($ids)) {
+        $decoded = json_decode($ids, true);
+        if (is_array($decoded)) $ids = $decoded;
+        else $ids = [$ids];
+    }
+    if (!is_array($ids)) return null;
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), function ($v) { return $v > 0; })));
+    if (empty($ids)) return null;
+    return json_encode($ids, JSON_UNESCAPED_UNICODE);
+}
+
 /** 把数据库凭证图片关联到收支记录（图片上传时 transaction_id=0） */
 function linkImagesToTransaction(int $txId, array $imageIds): void {
     $imageIds = array_values(array_unique(array_filter(array_map('intval', $imageIds))));
@@ -140,6 +154,7 @@ function handleTransactionsPost() {
     $cat        = mb_substr(trim($input['category'] ?? '其他'), 0, 100);
     $imagePath  = mb_substr(trim($input['image_path'] ?? ''), 0, 500);
     $payerIds   = $input['payer_ids'] ?? null;
+    $exemptIds  = $input['exempt_ids'] ?? null;
     $expAmt     = $input['expected_amount'] ?? null;
 
     // 处理多图凭证
@@ -180,8 +195,11 @@ function handleTransactionsPost() {
         $payerIds = null;
     }
 
+    // 单次免缴学生ID（v1.6）
+    $exemptIdsJson = normalizeIdList($exemptIds);
+
     $user = currentUser();
-    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, date, description, payer_ids, category, image_path, images, image_ids, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :d, :desc, :pids, :cat, :img, :imgs, :iids, :rb)");
+    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, date, description, payer_ids, exempt_ids, category, image_path, images, image_ids, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :d, :desc, :pids, :eids, :cat, :img, :imgs, :iids, :rb)");
     $stmt->execute([
         ':t'    => $type,
         ':sc'   => $subCat ?: null,
@@ -191,6 +209,7 @@ function handleTransactionsPost() {
         ':d'    => $date,
         ':desc' => $desc,
         ':pids' => $payerIds,
+        ':eids' => $exemptIdsJson,
         ':cat'  => $cat,
         ':img'  => $imagePath ?: null,
         ':imgs' => $imagesJson,
@@ -291,7 +310,14 @@ function handleTransactionsPut() {
             $newPayerIds = $old['payer_ids'];
         }
 
-        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, date=:d, description=:desc, payer_ids=:pids, category=:cat, image_path=:img, images=:imgs, image_ids=:iids WHERE id=:id");
+        // 处理单次免缴 exempt_ids（v1.6）
+        if (array_key_exists('exempt_ids', $input)) {
+            $newExemptIds = normalizeIdList($input['exempt_ids']);
+        } else {
+            $newExemptIds = $old['exempt_ids'] ?? null;
+        }
+
+        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, date=:d, description=:desc, payer_ids=:pids, exempt_ids=:eids, category=:cat, image_path=:img, images=:imgs, image_ids=:iids WHERE id=:id");
         $stmt->execute([
             ':t'    => $newType,
             ':sc'   => $newSubCat,
@@ -301,6 +327,7 @@ function handleTransactionsPut() {
             ':d'    => $newDate,
             ':desc' => $newDesc,
             ':pids' => $newPayerIds,
+            ':eids' => $newExemptIds,
             ':cat'  => $newCat,
             ':img'  => $newImg,
             ':imgs' => $newImages,

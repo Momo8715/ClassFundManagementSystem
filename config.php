@@ -189,6 +189,8 @@ function autoMigrate(): void {
         if (!in_array('images', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN images TEXT DEFAULT NULL COMMENT '多图凭证(JSON数组)' AFTER image_path");
         // transactions.image_ids 数据库凭证图ID（v1.5.6：凭证图片存库，列表优先加载缩略图）
         if (!in_array('image_ids', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN image_ids TEXT DEFAULT NULL COMMENT '凭证图片ID(JSON数组，存tx_images.id)' AFTER images");
+        // transactions.exempt_ids 单次免缴学生（v1.6：本轮免缴学生ID JSON数组，与永久免缴 exempt 字段独立）
+        if (!in_array('exempt_ids', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN exempt_ids TEXT DEFAULT NULL COMMENT '单次免缴学生ID(JSON数组)' AFTER payer_ids");
 
         // tx_images 凭证图片库（v1.5.6：原图+缩略图二进制存数据库，不再依赖 uploads/ 文件）
         $db->exec("CREATE TABLE IF NOT EXISTS tx_images (
@@ -226,7 +228,7 @@ define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
 // 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
 // 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
-define('SCHEMA_VERSION', '1.5.6');
+define('SCHEMA_VERSION', '1.6');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([
