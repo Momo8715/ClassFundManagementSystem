@@ -264,7 +264,7 @@
                 recent.forEach(function (t) {
                     recHtml += '<tr><td>' + escapeHtml(t.date) + '</td><td><span class="badge badge-' + (t.type === 'income' ? 'income' : 'expense') + '">' + (t.type === 'income' ? '收入' : '支出') + '</span></td>' +
                         '<td style="font-weight:700;color:' + (t.type === 'income' ? 'var(--success)' : 'var(--danger)') + '">' + (t.type === 'income' ? '+' : '-') + '¥' + Number(t.amount).toFixed(2) + '</td>' +
-                        '<td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.category) + '</td><td>' + escapeHtml(t.recorder_name || '未知') + '</td></tr>';
+                        '<td>' + escapeHtml(t.description) + '</td><td class="col-opt">' + escapeHtml(t.category) + '</td><td>' + escapeHtml(t.recorder_name || '未知') + '</td></tr>';
                 });
                 recHtml += '</tbody></table>';
             } else { recHtml = '<div class="empty"><div class="icon">📭</div>暂无记录</div>'; }
@@ -325,7 +325,7 @@
             if (list.length === 0) {
                 html = '<div class="empty"><div class="icon">📭</div>暂无记录</div>';
             } else {
-                html = '<table><thead><tr>' + (cd ? '<th style="width:28px"><input type="checkbox" onclick="window._toggleAllTx(this)"></th>' : '') + '<th>序号</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th>分类</th><th>凭证</th><th>记录人</th>' + (ce || cd ? '<th>操作</th>' : '') + '</tr></thead><tbody>';
+                html = '<table><thead><tr>' + (cd ? '<th style="width:28px"><input type="checkbox" onclick="window._toggleAllTx(this)"></th>' : '') + '<th>序号</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th class="col-opt">分类</th><th class="col-opt">凭证</th><th class="col-opt">记录人</th>' + (ce || cd ? '<th>操作</th>' : '') + '</tr></thead><tbody>';
                 list.forEach(function (t, i) {
                     var imgs = [];
                     // v1.5.6：优先数据库凭证图（缩略图加载）
@@ -334,10 +334,10 @@
                         if (t.images) { try { var ii = typeof t.images === 'string' ? JSON.parse(t.images) : t.images; if (Array.isArray(ii)) imgs = ii.filter(Boolean); } catch (e) {} }
                         if (!imgs.length && t.image_path) imgs = [t.image_path];
                     }
-                    var imgCell = imgs.length ? '<td>' + imgs.map(function (p) { return '<a href="' + escapeHtml(imgUrl(p, false)) + '" target="_blank" title="查看原图"><img src="' + escapeHtml(imgUrl(p, true)) + '" style="width:30px;height:24px;object-fit:cover;border-radius:4px;margin-right:2px;border:1px solid var(--border)" loading="lazy"></a>'; }).join('') + '</td>' : '<td style="color:var(--text-secondary)">-</td>';
+                    var imgCell = imgs.length ? '<td class="col-opt">' + imgs.map(function (p) { return '<a href="' + escapeHtml(imgUrl(p, false)) + '" target="_blank" title="查看原图"><img src="' + escapeHtml(imgUrl(p, true)) + '" style="width:30px;height:24px;object-fit:cover;border-radius:4px;margin-right:2px;border:1px solid var(--border)" loading="lazy"></a>'; }).join('') + '</td>' : '<td class="col-opt" style="color:var(--text-secondary)">-</td>';
                     html += '<tr>' + (cd ? '<td><input type="checkbox" class="txCb" value="' + t.id + '"></td>' : '') + '<td>' + (d.total - ((page - 1) * 20 + i)) + '</td><td>' + escapeHtml(t.date) + '</td><td><span class="badge badge-' + (t.type === 'income' ? 'income' : 'expense') + '">' + (t.type === 'income' ? '收入' : '支出') + '</span></td>' +
                         '<td style="font-weight:700;color:' + (t.type === 'income' ? 'var(--success)' : 'var(--danger)') + '">' + (t.type === 'income' ? '+' : '-') + '¥' + Number(t.amount).toFixed(2) + '</td>' +
-                        '<td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.category) + '</td>' + imgCell + '<td>' + escapeHtml(t.recorder_name || '未知') + '</td>';
+                        '<td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.category) + '</td>' + imgCell + '<td class="col-opt">' + escapeHtml(t.recorder_name || '未知') + '</td>';
                     if (ce || cd) { html += '<td style="white-space:nowrap">' + '<button class="btn btn-outline btn-sm" onclick="window._receipt(' + t.id + ')" title="收据">🧾</button> ' + (ce ? '<button class="btn btn-outline btn-sm" onclick="window._editTx(' + t.id + ')">✏️</button>' : '') + (cd ? '<button class="btn btn-danger btn-sm" onclick="window._deleteTx(' + t.id + ')" style="margin-left:4px">🗑️</button>' : '') + '</td>'; }
                     html += '</tr>';
                 });
@@ -795,7 +795,7 @@
     async function toggleRosterExempt(id, ex) { try { await api('expected_payment', { exempt_id: id, exempt: ex ? 0 : 1 }, 'POST'); renderPayments(); } catch (e) { toast(e.message, 'error'); } }
 
     // ========== 回收站 ==========
-    async function renderRecycle() { try { var d = await api('recycle_bin'); var list = d.items || [], html = ''; if (list.length === 0) { html = '<div class="empty">📭 回收站为空</div>'; } else { html = '<table><thead><tr><th>序号</th><th>日期</th><th>类型</th><th>金额</th><th>描述</th><th>删除时间</th><th>操作</th></tr></thead><tbody>'; list.forEach(function (t, i) { html += '<tr><td>' + (list.length - i) + '</td><td>' + escapeHtml(t.date) + '</td><td>' + escapeHtml(t.type) + '</td><td>¥' + Number(t.amount || 0).toFixed(2) + '</td><td>' + escapeHtml(t.description) + '</td><td>' + escapeHtml(t.deleted_at) + '</td><td style="white-space:nowrap"><button class="btn btn-success btn-sm" onclick="window._restoreTx(' + t.id + ')">恢复</button><button class="btn btn-danger btn-sm" onclick="window._permDeleteTx(' + t.id + ')" style="margin-left:4px">永久删除</button></td></tr>'; }); html += '</tbody></table>'; } document.getElementById('recycleTable').innerHTML = html; } catch (e) { toast(e.message, 'error'); } }
+    async function renderRecycle() { try { var d = await api('recycle_bin'); var list = d.items || [], html = ''; if (list.length === 0) { html = '<div class="empty">📭 回收站为空</div>'; } else { html = '<table><thead><tr><th>序号</th><th>日期</th><th class="col-opt">类型</th><th>金额</th><th>描述</th><th class="col-opt">删除时间</th><th>操作</th></tr></thead><tbody>'; list.forEach(function (t, i) { html += '<tr><td>' + (list.length - i) + '</td><td>' + escapeHtml(t.date) + '</td><td class="col-opt">' + escapeHtml(t.type) + '</td><td>¥' + Number(t.amount || 0).toFixed(2) + '</td><td>' + escapeHtml(t.description) + '</td><td class="col-opt">' + escapeHtml(t.deleted_at) + '</td><td style="white-space:nowrap"><button class="btn btn-success btn-sm" onclick="window._restoreTx(' + t.id + ')">恢复</button><button class="btn btn-danger btn-sm" onclick="window._permDeleteTx(' + t.id + ')" style="margin-left:4px">永久删除</button></td></tr>'; }); html += '</tbody></table>'; } document.getElementById('recycleTable').innerHTML = html; } catch (e) { toast(e.message, 'error'); } }
     function restoreTx(id) { api('recycle_bin&id=' + id, {}, 'PUT').then(function () { renderRecycle(); renderTransactions(); renderDashboard(); toast('已恢复'); }).catch(function (e) { toast(e.message, 'error'); }); }
     function permDeleteTx(id) { if (!confirm('⚠️ 永久删除后无法恢复，确定？')) return; api('recycle_bin&id=' + id, {}, 'DELETE').then(function () { renderRecycle(); toast('已永久删除'); }).catch(function (e) { toast(e.message, 'error'); }); }
 

@@ -391,19 +391,34 @@ function handleExportUnpaid() {
         $lastExemptIds = json_decode($txs[0]['exempt_ids'] ?? '', true) ?: [];
     }
 
+    // 详细欠费名单：序号/姓名/每人应缴/已缴/欠费/状态 + 合计行
     $rows = [];
+    $totalOwe = 0.0;
+    $totalPaidOfOwe = 0.0;
     foreach ($ps as $sid => $info) {
         if ($info['exempt']) continue; // 跳过永久免缴学生
         if (in_array($sid, $lastExemptIds)) continue; // 跳过本轮单次免缴学生
-        if ($perPerson > 0) {
-            // 已缴清阈值与 handlePayments 一致（0.99 容差），未缴清（含部分缴费）列入名单
-            if ($info['paid'] < $perPerson * 0.99) $rows[] = [$info['name'], '未缴清', number_format($info['paid'], 2, '.', '')];
-        } elseif ($info['paid'] <= 0) {
-            $rows[] = [$info['name'], '未缴纳', '0'];
-        }
+        $paid = round(floatval($info['paid']), 2);
+        $isOwe = ($perPerson > 0 && $paid < $perPerson * 0.99) || ($perPerson <= 0 && $paid <= 0);
+        if (!$isOwe) continue;
+        $owe = $perPerson > 0 ? round(max(0, $perPerson - $paid), 2) : 0;
+        $rows[] = [
+            (string)(count($rows) + 1),
+            $info['name'],
+            $perPerson > 0 ? number_format($perPerson, 2, '.', '') : '未设置',
+            number_format($paid, 2, '.', ''),
+            number_format($owe, 2, '.', ''),
+            $perPerson > 0 ? '未缴清' : '未缴纳',
+        ];
+        $totalOwe += $owe;
+        $totalPaidOfOwe += $paid;
     }
-    if (empty($rows)) $rows[] = ['全部已缴纳', '', ''];
+    if (empty($rows)) {
+        $rows[] = ['全部已缴纳', '', '', '', '', ''];
+    } else {
+        $rows[] = ['合计', '欠费 ' . count($rows) . ' 人', '', '已缴 ¥' . number_format($totalPaidOfOwe, 2, '.', ''), '欠费 ¥' . number_format($totalOwe, 2, '.', ''), ''];
+    }
 
-    outputSimpleXlsx('欠费名单', '欠费名单', ['姓名', '状态', '已缴金额'], $rows);
+    outputSimpleXlsx('欠费名单_' . date('Ymd_His'), '欠费名单', ['序号', '姓名', '每人应缴', '已缴金额', '欠费金额', '状态'], $rows);
     exit;
 }
