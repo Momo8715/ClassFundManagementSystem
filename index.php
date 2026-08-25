@@ -53,7 +53,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <!-- 主题：localStorage 控制，防闪烁 -->
     <script data-cfasync="false">window.__cfRLUnblockHandlers = true;(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');})()</script>
     <!-- 样式表 -->
-    <link rel="stylesheet" href="assets/css/style.css?v=10">
+    <link rel="stylesheet" href="assets/css/style.css?v=12">
     </head>
 <body>
     <!-- 加载提示 -->
@@ -396,7 +396,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                 <label>凭证图片（可选，可多张）</label>
                 <div style="display:flex;gap:8px">
                     <input type="file" id="txImageFile" accept="image/*" multiple style="flex:1">
-                    <button type="button" class="btn btn-outline btn-sm" onclick="uploadTxImages()">📤 上传</button>
+                    <button type="button" class="btn btn-outline btn-sm" id="btnUploadTxImg" onclick="uploadTxImages()">📤 上传</button>
                 </div>
                 <div id="txImagePreview" style="margin-top:6px"></div>
                 <input type="hidden" id="txImages">
@@ -452,7 +452,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=18" defer data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=21" defer data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">

@@ -4,9 +4,14 @@
  * 所有请求入口，分发到对应模块处理
  */
 ini_set('display_errors', 0);
-error_reporting(0);
+error_reporting(E_ALL);
+ini_set('log_errors', 1);
 
 require_once __DIR__ . '/config.php';
+
+// API 响应一律不缓存（保证数据实时性），配合 Cloudflare 缓存规则
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 
 // 未安装时返回友好提示
 if (!isDbInstalled()) {

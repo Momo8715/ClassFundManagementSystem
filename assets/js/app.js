@@ -93,7 +93,20 @@
             }
             opts.body = new URLSearchParams(entries);
         }
-        var r = await fetch(url, opts);
+        // 网关/连接层错误（Cloudflare 525/502/504 等，请求未到达业务层）自动重试 1 次
+        var r, _attempts = 0;
+        while (true) {
+            try {
+                r = await fetch(url, opts);
+            } catch (e) {
+                if (_attempts < 1) { _attempts++; await new Promise(function (res) { setTimeout(res, 800); }); continue; }
+                throw e;
+            }
+            if ((r.status === 525 || r.status === 502 || r.status === 504) && _attempts < 1) {
+                _attempts++; await new Promise(function (res) { setTimeout(res, 800); }); continue;
+            }
+            break;
+        }
         var data = await r.json();
         if (!r.ok) throw new Error(data.error || '请求失败');
         return data;
@@ -659,6 +672,12 @@
         var subCat = document.getElementById('txSubCategory').value;
         var srcInfo = document.getElementById('txSourceInfo').value.trim();
         if (subCat === '其他来源' && !srcInfo) return toast('请填写来源信息', 'error');
+        // 自动上传：选择图片后未点「上传」按钮时，保存前自动上传
+        var pendingFiles = document.getElementById('txImageFile').files;
+        if (pendingFiles && pendingFiles.length) {
+            var upOk = await uploadTxImages(true);
+            if (!upOk) return;
+        }
         // v1.5.6：数字 = 数据库图ID（image_ids），字符串 = 旧版文件路径（images/image_path 兼容）
         var imgIds = txImageList.filter(function (x) { return typeof x === 'number'; });
         var imgPaths = txImageList.filter(function (x) { return typeof x !== 'number'; });
@@ -672,23 +691,65 @@
 
     function deleteTx(id) { if (!confirm('确定删除？')) return; api('transactions&id=' + id, {}, 'DELETE').then(function () { renderTransactions(); renderDashboard(); toast('已删除'); }).catch(function (e) { toast(e.message, 'error'); }); }
 
-    async function uploadTxImages() {
+    // 上传前压缩：最长边 1280px、JPEG 质量 0.9（大图体积大幅减小，上传更快）
+    function compressImage(file) {
+        return new Promise(function (resolve) {
+            if (file.size <= 200 * 1024) return resolve(file); // 小文件直接上传
+            try {
+                var img = new Image();
+                var url = URL.createObjectURL(file);
+                img.onload = function () {
+                    var maxEdge = 1280;
+                    var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+                    if (!w || !h) { URL.revokeObjectURL(url); return resolve(file); }
+                    var scale = Math.min(1, maxEdge / Math.max(w, h));
+                    if (scale >= 1 && file.size <= 500 * 1024) { URL.revokeObjectURL(url); return resolve(file); }
+                    var cw = Math.max(1, Math.round(w * scale));
+                    var ch = Math.max(1, Math.round(h * scale));
+                    var canvas = document.createElement('canvas');
+                    canvas.width = cw; canvas.height = ch;
+                    var ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, cw, ch); // PNG 透明区域填白底
+                    ctx.drawImage(img, 0, 0, cw, ch);
+                    URL.revokeObjectURL(url);
+                    if (typeof canvas.toBlob !== 'function') return resolve(file);
+                    canvas.toBlob(function (blob) {
+                        if (blob && blob.size > 0 && blob.size < file.size) resolve(blob);
+                        else resolve(file);
+                    }, 'image/jpeg', 0.9);
+                };
+                img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+                img.src = url;
+            } catch (e) { resolve(file); }
+        });
+    }
+
+    async function uploadTxImages(silent) {
         var files = document.getElementById('txImageFile').files;
-        if (!files || !files.length) return toast('请先选择图片', 'error');
+        if (!files || !files.length) { if (!silent) toast('请先选择图片', 'error'); return 0; }
+        var okCount = 0;
+        var btnEl = document.getElementById('btnUploadTxImg');
+        if (btnEl) { btnEl.textContent = '⏳ 上传中...'; btnEl.disabled = true; }
         for (var i = 0; i < files.length; i++) {
+            var upFile = await compressImage(files[i]);
             var fd = new FormData();
-            fd.append('image', files[i]);
+            fd.append('image', upFile, files[i].name || 'image.jpg');
             fd.append("csrf_" + "token", _t);
             try {
                 var r = await fetch(API + '?action=upload_image', { method: 'POST', body: fd });
-                var data = await r.json();
-                if (!r.ok) throw new Error(data.error);
+                var txt = await r.text();
+                var data = {};
+                try { data = JSON.parse(txt); } catch (e) { data = { error: '服务器返回异常' }; }
+                if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
                 txImageList.push(data.id);
-            } catch (e) { toast('第 ' + (i + 1) + ' 张上传失败: ' + e.message, 'error'); }
+                okCount++;
+            } catch (e) { toast('第 ' + (i + 1) + ' 张图片上传失败：' + e.message, 'error'); }
         }
         document.getElementById('txImageFile').value = '';
         renderTxImagePreview();
-        if (txImageList.length) toast('已上传 ' + txImageList.length + ' 张图片');
+        if (btnEl) { btnEl.textContent = '📤 上传'; btnEl.disabled = false; }
+        if (!silent && okCount > 0) toast('已上传 ' + okCount + ' 张图片');
+        return okCount;
     }
 
     function renderTxImagePreview() {

@@ -28,3 +28,6 @@ Thumbs.db
 
 # Reasonix
 .reasonix/
+
+# 本地探针脚本（不发布）
+_up_probe.ps1

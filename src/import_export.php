@@ -93,11 +93,13 @@ function makeImageThumbnail(string $data, int $maxEdge = 400): ?string {
 }
 
 function handleUploadImage() {
+    $dbg = __DIR__ . '/../uploads/_up_debug.log';
+
     requirePermission('addTransaction');
     requireCsrfToken();
 
     if (empty($_FILES['image'])) {
-        jsonOutput(['error' => '没有上传文件'], 400);
+            jsonOutput(['error' => '没有上传文件'], 400);
     }
 
     // 清理孤儿凭证图：上传后超过 24 小时仍未关联收支记录（transaction_id=0）的图片
@@ -112,7 +114,7 @@ function handleUploadImage() {
     // 使用真实 MIME 检测（修复：之前仅检查扩展名）
     $error = validateImageUpload($file);
     if ($error !== null) {
-        securityLog('invalid_image_upload', ['error' => $error, 'filename' => $file['name'] ?? 'unknown']);
+            securityLog('invalid_image_upload', ['error' => $error, 'filename' => $file['name'] ?? 'unknown']);
         jsonOutput(['error' => $error], 400);
     }
 
@@ -131,19 +133,23 @@ function handleUploadImage() {
     // v1.5.6：凭证图片存入数据库（原图 + GD 缩略图），不再写入 uploads/ 目录
     $full = file_get_contents($file['tmp_name']);
     if ($full === false || $full === '') {
-        jsonOutput(['error' => '读取图片失败'], 500);
+            jsonOutput(['error' => '读取图片失败'], 500);
     }
     $thumb = makeImageThumbnail($full, 400);
     if ($thumb === null) {
-        jsonOutput(['error' => '图片处理失败（服务器不支持该图片格式或 GD 不可用）'], 500);
+            jsonOutput(['error' => '图片处理失败（服务器不支持该图片格式或 GD 不可用）'], 500);
     }
 
-    $stmt = db()->prepare("INSERT INTO tx_images (transaction_id, seq, mime, thumb, full) VALUES (0, 0, :mime, :thumb, :full)");
-    $stmt->bindValue(':mime', $mime);
-    $stmt->bindValue(':thumb', $thumb, PDO::PARAM_LOB);
-    $stmt->bindValue(':full', $full, PDO::PARAM_LOB);
-    $stmt->execute();
-    $imgId = (int)db()->lastInsertId();
+    try {
+        $stmt = db()->prepare("INSERT INTO tx_images (transaction_id, seq, mime, thumb, full) VALUES (0, 0, :mime, :thumb, :full)");
+        $stmt->bindValue(':mime', $mime);
+        $stmt->bindValue(':thumb', $thumb, PDO::PARAM_LOB);
+        $stmt->bindValue(':full', $full, PDO::PARAM_LOB);
+        $stmt->execute();
+        $imgId = (int)db()->lastInsertId();
+        } catch (\Throwable $e) {
+            jsonOutput(['error' => '图片保存失败，请稍后重试'], 500);
+    }
 
     jsonOutput(['ok' => true, 'id' => $imgId]);
 }
