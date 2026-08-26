@@ -49,11 +49,31 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <title>📒 班级班费管理系统</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📒</text></svg>">
     <!-- Chart.js 本地化（原 jsdelivr CDN 国内访问慢，改为本地走 Cloudflare 优选 IP）；defer 不阻塞首屏渲染 -->
-    <script src="assets/vendor/chart.umd.min.js?v=8" defer data-cfasync="false"></script>
+        <!-- 资源加载失败自动重试（CF 525/网关错误时 JS/CSS 自动重载，避免白屏） -->
+    <script data-cfasync="false">
+    window.__retryResource = function (el, src) {
+        if (el && el.__retried) return;
+        if (el) el.__retried = true;
+        setTimeout(function () {
+            if (el && el.tagName === 'SCRIPT') {
+                var s = document.createElement('script');
+                s.src = src; s.defer = true;
+                s.onload = function () { window.location.reload(); };
+                document.head.appendChild(s);
+            } else {
+                var l = document.createElement('link');
+                l.rel = 'stylesheet'; l.href = src;
+                document.head.appendChild(l);
+            }
+        }, 1500);
+    };
+    </script>
+    <!-- Chart.js 本地化（原 jsdelivr CDN 国内访问慢，改为本地走 Cloudflare 优选 IP）；defer 不阻塞首屏渲染 -->
+    <script src="assets/vendor/chart.umd.min.js?v=8" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/vendor/chart.umd.min.js?v=8')"></script>
     <!-- 主题：localStorage 控制，防闪烁 -->
     <script data-cfasync="false">window.__cfRLUnblockHandlers = true;(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');})()</script>
     <!-- 样式表 -->
-    <link rel="stylesheet" href="assets/css/style.css?v=12">
+    <link rel="stylesheet" href="assets/css/style.css?v=12" onerror="window.__retryResource(this,'assets/css/style.css?v=12')">
     </head>
 <body>
     <!-- 加载提示 -->
@@ -452,7 +472,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=21" defer data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=21" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=21')"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">
