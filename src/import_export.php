@@ -175,7 +175,7 @@ function handleTxImage() {
     header('Content-Type: ' . $mime);
     header('Content-Length: ' . strlen($data));
     // 凭证图片入库后不可变，允许浏览器/CDN 缓存 1 天
-    header('Cache-Control: public, max-age=86400');
+    header('Cache-Control: public, max-age=2592000, immutable');
     echo $data;
     exit;
 }

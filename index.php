@@ -26,7 +26,7 @@ if ($loggedIn) {
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
 } else {
-    header('Cache-Control: public, max-age=7200, s-maxage=7200');
+    header('Cache-Control: public, max-age=7200, s-maxage=43200');
 }
 
 // 确保 CSRF token 已生成（兼容旧 session）
@@ -69,7 +69,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     };
     </script>
     <!-- Chart.js 本地化（原 jsdelivr CDN 国内访问慢，改为本地走 Cloudflare 优选 IP）；defer 不阻塞首屏渲染 -->
-    <script src="assets/vendor/chart.umd.min.js?v=8" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/vendor/chart.umd.min.js?v=8')"></script>
+    <!-- Chart.js 已改为按需加载（app.js ensureChart 动态加载，首屏不加载 205KB） -->
     <!-- 主题：localStorage 控制，防闪烁 -->
     <script data-cfasync="false">window.__cfRLUnblockHandlers = true;(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');})()</script>
     <!-- 样式表 -->
@@ -472,7 +472,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=21" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=21')"></script>
+    <script src="assets/js/app.js?v=22" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=22')"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">
