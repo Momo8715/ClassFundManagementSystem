@@ -71,6 +71,16 @@
         return r.substring(0, 64);
     }
 
+    // Chart.js 按需加载（仅图表页动态加载，首屏省 ~205KB）
+    function ensureChart(cb) {
+        if (window.Chart) { cb(); return; }
+        var s = document.createElement('script');
+        s.src = 'assets/vendor/chart.umd.min.js?v=8';
+        s.onload = cb;
+        s.onerror = function () { setTimeout(function () { ensureChart(cb); }, 1200); };
+        document.head.appendChild(s);
+    }
+
     // ========== API 调用 ==========
 
     async function api(action, params, method) {
@@ -297,22 +307,26 @@
                 if (t.type === 'income') months[m].income += parseFloat(t.amount);
                 else { months[m].expense += parseFloat(t.amount); cats[t.category] = (cats[t.category] || 0) + parseFloat(t.amount); }
             });
-            var keys = Object.keys(months).sort();
             var trendEl = document.getElementById('chartTrend');
-            var ctx1 = trendEl ? trendEl.getContext('2d') : null;
-            if (ctx1 && window.Chart) {
-                if (chartTrend) chartTrend.destroy();
-                chartTrend = new Chart(ctx1, { type: 'line', data: { labels: keys, datasets: [
-                    { label: '收入', data: keys.map(function (k) { return months[k].income; }), borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.1)', fill: true, tension: .3 },
-                    { label: '支出', data: keys.map(function (k) { return months[k].expense; }), borderColor: '#f43f5e', backgroundColor: 'rgba(244,63,94,.1)', fill: true, tension: .3 }
-                ]}, options: { responsive: true, plugins: { legend: { labels: { font: { size: 11 } } } }, scales: { y: { ticks: { font: { size: 10 } } }, x: { ticks: { font: { size: 10 } } } } } });
-            }
-            var catKeys = Object.keys(cats).sort(function (a, b) { return cats[b] - cats[a]; }).slice(0, 6);
             var pieEl = document.getElementById('chartPie');
-            var ctx2 = pieEl ? pieEl.getContext('2d') : null;
-            if (ctx2 && catKeys.length && window.Chart) {
-                if (chartPie) chartPie.destroy();
-                chartPie = new Chart(ctx2, { type: 'doughnut', data: { labels: catKeys, datasets: [{ data: catKeys.map(function (k) { return cats[k]; }), backgroundColor: ['#6366f1','#f43f5e','#f59e0b','#10b981','#8b5cf6','#ec4899'] }] }, options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, padding: 10 } } } } });
+            if (trendEl || pieEl) {
+                ensureChart(function () {
+                    var keys = Object.keys(months).sort();
+                    var ctx1 = trendEl ? trendEl.getContext('2d') : null;
+                    if (ctx1 && window.Chart) {
+                        if (chartTrend) chartTrend.destroy();
+                        chartTrend = new Chart(ctx1, { type: 'line', data: { labels: keys, datasets: [
+                            { label: '收入', data: keys.map(function (k) { return months[k].income; }), borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.1)', fill: true, tension: .3 },
+                            { label: '支出', data: keys.map(function (k) { return months[k].expense; }), borderColor: '#f43f5e', backgroundColor: 'rgba(244,63,94,.1)', fill: true, tension: .3 }
+                        ]}, options: { responsive: true, plugins: { legend: { labels: { font: { size: 11 } } } }, scales: { y: { ticks: { font: { size: 10 } } }, x: { ticks: { font: { size: 10 } } } } } });
+                    }
+                    var catKeys = Object.keys(cats).sort(function (a, b) { return cats[b] - cats[a]; }).slice(0, 6);
+                    var ctx2 = pieEl ? pieEl.getContext('2d') : null;
+                    if (ctx2 && catKeys.length && window.Chart) {
+                        if (chartPie) chartPie.destroy();
+                        chartPie = new Chart(ctx2, { type: 'doughnut', data: { labels: catKeys, datasets: [{ data: catKeys.map(function (k) { return cats[k]; }), backgroundColor: ['#6366f1','#f43f5e','#f59e0b','#10b981','#8b5cf6','#ec4899'] }] }, options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, padding: 10 } } } } });
+                    }
+                });
             }
         } catch (e) {}
     }
@@ -515,7 +529,7 @@
     }
 
     function drawReportCharts(d) {
-        if (!window.Chart) return;
+        if (!window.Chart) { ensureChart(function () { drawReportCharts(d); }); return; }
         var months = d.by_month || [];
         var barEl = document.getElementById('reportChartBar');
         if (barEl && months.length) {
