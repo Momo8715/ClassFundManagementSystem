@@ -85,8 +85,8 @@ function handleTransactionsGet() {
     $search = trim($_GET['search'] ?? '');
     $id     = intval($_GET['id'] ?? 0);
     $category = trim($_GET['category'] ?? '');
-    $amountMin = $_GET['amount_min'] !== '' ? floatval($_GET['amount_min'] ?? 0) : 0;
-    $amountMax = $_GET['amount_max'] !== '' ? floatval($_GET['amount_max'] ?? 0) : 0;
+    $amountMin = isset($_GET['amount_min']) && $_GET['amount_min'] !== '' ? floatval($_GET['amount_min']) : 0;
+    $amountMax = isset($_GET['amount_max']) && $_GET['amount_max'] !== '' ? floatval($_GET['amount_max']) : 0;
     $recorder = trim($_GET['recorder'] ?? '');
     $page   = max(1, intval($_GET['page'] ?? 1));
     $perPage = min(1000, max(10, intval($_GET['per_page'] ?? 50)));
