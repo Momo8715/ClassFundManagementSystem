@@ -66,6 +66,20 @@ function handleRecycleBin(string $method) {
             requireCsrfToken();
             $input = jsonInput();
             $id = intval($_GET['id'] ?? $input['id'] ?? 0);
+            // v1.8：支持批量恢复（ids 数组）
+            $ids = $input['ids'] ?? null;
+            if (is_string($ids)) $ids = json_decode($ids, true) ?: [];
+            if (!empty($ids)) {
+                $ids = array_values(array_unique(array_filter(array_map('intval', $ids), function($v){ return $v>0; })));
+                if (empty($ids)) jsonOutput(['error' => '无效 ID'], 400);
+                $ph = implode(',', array_fill(0, count($ids), '?'));
+                $upd = db()->prepare("UPDATE transactions SET deleted_at=NULL WHERE id IN ($ph) AND deleted_at IS NOT NULL");
+                $upd->execute($ids);
+                $n = $upd->rowCount();
+                $user = currentUser();
+                addLog($user['id'], $user['username'], 'batch_restore', 'transaction', null, ['count' => $n]);
+                jsonOutput(['ok' => true, 'restored' => $n]);
+            }
             if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
 
             // 仅允许恢复已软删除（在回收站中）的记录
@@ -85,6 +99,27 @@ function handleRecycleBin(string $method) {
             requireCsrfToken();
             $input = jsonInput();
             $id = intval($_GET['id'] ?? $input['id'] ?? 0);
+            // v1.8：支持批量删除（ids）与清空（all）
+            $ids = $input['ids'] ?? null;
+            if (is_string($ids)) $ids = json_decode($ids, true) ?: [];
+            if (($input['all'] ?? false) || ($_GET['all'] ?? '') === '1') {
+                $delAll = db()->query("DELETE FROM transactions WHERE deleted_at IS NOT NULL");
+                $n = $delAll->rowCount();
+                $user = currentUser();
+                addLog($user['id'], $user['username'], 'clear_recycle_bin', 'transaction', null, ['count' => $n]);
+                jsonOutput(['ok' => true, 'deleted' => $n]);
+            }
+            if (!empty($ids)) {
+                $ids = array_values(array_unique(array_filter(array_map('intval', $ids), function($v){ return $v>0; })));
+                if (empty($ids)) jsonOutput(['error' => '无效 ID'], 400);
+                $ph = implode(',', array_fill(0, count($ids), '?'));
+                $delBatch = db()->prepare("DELETE FROM transactions WHERE id IN ($ph) AND deleted_at IS NOT NULL");
+                $delBatch->execute($ids);
+                $n = $delBatch->rowCount();
+                $user = currentUser();
+                addLog($user['id'], $user['username'], 'batch_permanent_delete', 'transaction', null, ['count' => $n]);
+                jsonOutput(['ok' => true, 'deleted' => $n]);
+            }
             if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
 
             $oldStmt = db()->prepare("SELECT * FROM transactions WHERE id=:id AND deleted_at IS NOT NULL");

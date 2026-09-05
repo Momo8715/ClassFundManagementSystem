@@ -47,6 +47,12 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>📒 班级班费管理系统</title>
+    <meta name="theme-color" content="#6366f1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="assets/img/v3-icon-192.png">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📒</text></svg>">
     <!-- Chart.js 本地化（原 jsdelivr CDN 国内访问慢，改为本地走 Cloudflare 优选 IP）；defer 不阻塞首屏渲染 -->
         <!-- 资源加载失败自动重试（CF 525/网关错误时 JS/CSS 自动重载，避免白屏） -->
@@ -73,7 +79,51 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <!-- 主题：localStorage 控制，防闪烁 -->
     <script data-cfasync="false">window.__cfRLUnblockHandlers = true;(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark');})()</script>
     <!-- 样式表 -->
-    <link rel="stylesheet" href="assets/css/style.css?v=12" onerror="window.__retryResource(this,'assets/css/style.css?v=12')">
+    <style data-cfasync="false">
+    /* 首屏关键样式：登录页快速可见，不阻塞交互 */
+    .login-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:9999;background:linear-gradient(135deg,#0f172a,#1e1b4b,#312e81,#4338ca);}
+    .login-card{background:rgba(255,255,255,.08);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.1);border-radius:24px;padding:36px 32px;width:min(420px,94vw);box-shadow:0 25px 60px rgba(0,0,0,.3);}
+    .login-card h1{font-size:24px;text-align:center;margin-bottom:16px;color:#c7d2fe;font-family:-apple-system,sans-serif;}
+    .btn-guest,.btn-login{width:100%;padding:13px;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:14px;}
+    .btn-guest{background:linear-gradient(135deg,#10b981,#059669);color:#fff;}
+    .btn-login{background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;}
+    .form-group{margin-bottom:14px;}
+    .form-group label{display:block;font-size:13px;color:#cbd5e1;margin-bottom:6px;font-family:-apple-system,sans-serif;}
+    .form-group input{width:100%;padding:10px 14px;border:1.5px solid rgba(255,255,255,.15);border-radius:8px;font-size:14px;background:rgba(255,255,255,.06);color:#fff;font-family:inherit;box-sizing:border-box;}
+    .login-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:#94a3b8;font-size:12px;font-family:-apple-system,sans-serif;}
+    .login-divider::before,.login-divider::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.12);}
+    .hint{font-size:12px;color:#94a3b8;text-align:center;margin-top:12px;font-family:-apple-system,sans-serif;}
+    .wave{display:inline-block;}
+    </style>
+    <link rel="stylesheet" href="assets/css/style.css?v=17" onerror="window.__retryResource(this,'assets/css/style.css?v=17')">
+    <script>
+    // PWA Service Worker 注册（仅 HTTPS 生效，失败静默不影响使用）
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+            navigator.serviceWorker.register('sw.js').catch(function () {});
+        });
+    }
+    </script>
+    <!-- 预加载关键资源：提前建立连接/加载JS，减少等待 -->
+    <link rel="preload" href="assets/css/style.css?v=17" as="style">
+    <link rel="preload" href="assets/js/app.js?v=29" as="script">
+    <link rel="preconnect" href="/" crossorigin>
+    <script data-cfasync="false">
+    // 防止 app.js 未就绪时点击登录报错：按钮先禁用，JS 加载后启用
+    window.__appReady = false;
+    function __guardClick(fn) {
+        return function () {
+            if (window.__appReady || typeof window[fn] === 'function') {
+                var f = window[fn];
+                if (typeof f === 'function') return f.apply(null, arguments);
+            }
+            // app.js 未就绪：提示并轻量重试加载
+            var tip = document.getElementById('loginDebug');
+            if (tip) { tip.style.display = 'block'; tip.textContent = '⏳ 页面加载中，请稍候再试...'; }
+            setTimeout(function(){ location.reload(); }, 2500);
+        };
+    }
+    </script>
     </head>
 <body>
     <!-- 加载提示 -->
@@ -85,7 +135,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <div class="login-overlay" id="loginScreen">
         <div class="login-card">
             <h1>📒 班级班费管理系统</h1>
-            <button class="btn-guest" onclick="doGuestLogin()">
+            <button class="btn-guest" onclick="__guardClick('doGuestLogin')()">
                 <span class="wave">👋</span> 我是同学，直接进入
             </button>
             <p style="text-align:center;font-size:11px;color:var(--text-secondary);margin-top:6px">
@@ -100,7 +150,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                 <label>密码</label>
                 <input type="password" id="loginPass" placeholder="请输入密码" autocomplete="current-password">
             </div>
-            <button class="btn-login" onclick="doLogin()">🔐 登录</button>
+            <button class="btn-login" onclick="__guardClick('doLogin')()">🔐 登录</button>
             <p class="hint" id="loginError" style="color:var(--danger);display:none"></p>
             <p class="hint" id="loginDebug" style="color:#f59e0b;display:none;margin-top:4px;font-size:11px"></p>
             <p class="hint">💡 账号由管理员添加，不支持自行注册</p>
@@ -190,6 +240,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                         </select>
                         <button class="btn btn-primary btn-sm" onclick="renderReport()">🔍 生成报表</button>
                         <button class="btn btn-outline btn-sm" onclick="downloadReport()">📥 下载 Excel</button>
+                        <button class="btn btn-outline btn-sm" onclick="downloadReportPdf()">📄 下载 PDF</button>
                         <button class="btn btn-outline btn-sm" onclick="window.print()">🖨️ 打印</button>
                     </div>
                 </div>
@@ -229,7 +280,19 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                             <option value="expense">支出</option>
                         </select>
                         <input type="month" id="filterMonth" onchange="window._renderTxPage(1)">
-                        <input type="text" id="filterSearch" placeholder="搜索..." oninput="window._renderTxPage(1)">
+                        <input type="text" id="filterSearch" placeholder="关键词" oninput="window._renderTxPage(1)" style="width:90px">
+                        <select id="filterCategory" onchange="window._renderTxPage(1)" style="max-width:110px">
+                            <option value="">全部分类</option>
+                            <option value="班费">班费</option>
+                            <option value="日常支出">日常支出</option>
+                            <option value="活动支出">活动支出</option>
+                            <option value="设备采购">设备采购</option>
+                            <option value="其他支出">其他支出</option>
+                            <option value="其他">其他</option>
+                        </select>
+                        <input type="number" id="filterAmountMin" placeholder="金额≥" min="0" step="0.01" style="width:80px" onchange="window._renderTxPage(1)">
+                        <input type="number" id="filterAmountMax" placeholder="金额≤" min="0" step="0.01" style="width:80px" onchange="window._renderTxPage(1)">
+                        <input type="text" id="filterRecorder" placeholder="记录人" style="width:80px" oninput="window._renderTxPage(1)">
                         <button class="btn btn-danger btn-sm" onclick="window._batchDeleteTx()" id="btnBatchDel" style="display:none">🗑️ 批量删除</button>
                         <button class="btn btn-primary" onclick="showAddTransaction()" id="btnAddTx" style="display:none">+ 添加</button>
                     </div>
@@ -345,6 +408,8 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
             <div class="page" id="page-recycle">
                 <div class="section-header">
                     <h3>🗑️ 回收站</h3>
+                    <button class="btn btn-success btn-sm" onclick="window._restoreAllRecycle()">♻️ 全部恢复</button>
+                    <button class="btn btn-danger btn-sm" onclick="window._clearRecycle()">🧹 清空</button>
                     <button class="btn btn-outline btn-sm" onclick="renderRecycle()">🔄 刷新</button>
                 </div>
                 <div class="table-wrap" id="recycleTable"></div>
@@ -472,7 +537,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=22" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=22')"></script>
+    <script src="assets/js/app.js?v=29" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=29')"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">
@@ -490,5 +555,51 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <footer style="text-align:center;padding:14px 0 22px;font-size:12px;color:var(--text-secondary);opacity:.75">
         Momo ©2026｜陌沫　V <?php echo htmlspecialchars($siteVersion); ?>
     </footer>
+    <!-- v1.8: 移动端下拉刷新 + 数据过期自动刷新 -->
+    <script data-cfasync="false">
+    (function(){
+        var isTouch = 'ontouchstart' in window;
+        // 1. 页面回到前台自动刷新当前页数据（数据过期提示）
+        var lastVisible = Date.now();
+        document.addEventListener('visibilitychange', function(){
+            if (document.visibilityState === 'visible') {
+                var away = Date.now() - lastVisible;
+                if (away > 60000 && window.__appReady) {
+                    // 离开超1分钟，回来自动刷新当前活跃页
+                    var cur = document.querySelector('.page.active');
+                    if (cur && cur.id && window._renderTxPage) {
+                        var map = { 'page-transactions':'_renderTxPage', 'page-logs':'_renderLogs' };
+                        if (map[cur.id] && window[map[cur.id]]) { window[map[cur.id]](1); }
+                    }
+                    if (window.renderRecycle && cur && cur.id==='page-recycle') window.renderRecycle();
+                    if (window.renderSecurity && cur && cur.id==='page-security') window.renderSecurity();
+                }
+            } else {
+                lastVisible = Date.now();
+            }
+        });
+        // 2. 移动端下拉刷新（触摸）
+        if (isTouch && !location.hash) {
+            var startY = 0, pulling = false;
+            var mainEl = document.querySelector('.main');
+            if (mainEl) {
+                mainEl.addEventListener('touchstart', function(e){ startY = e.touches[0].clientY; }, {passive:true});
+                mainEl.addEventListener('touchmove', function(e){
+                    if (window.scrollY <= 0 && e.touches[0].clientY - startY > 80 && !pulling) {
+                        pulling = true;
+                        var cur = document.querySelector('.page.active');
+                        // 触发当前页刷新
+                        if (window.renderRecycle && cur && cur.id==='page-recycle') window.renderRecycle();
+                        if (cur && cur.id==='page-transactions' && window._renderTxPage) window._renderTxPage(1);
+                        if (cur && cur.id==='page-report' && window.renderReport) window.renderReport();
+                        if (cur && cur.id==='page-payments' && window.renderPayments) window.renderPayments();
+                        if (cur && cur.id==='page-logs' && window._renderLogs) window._renderLogs(1);
+                        setTimeout(function(){ pulling = false; }, 1500);
+                    }
+                }, {passive:true});
+            }
+        }
+    })();
+    </script>
 </body>
 </html>

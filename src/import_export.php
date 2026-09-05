@@ -130,7 +130,7 @@ function handleUploadImage() {
         if ($info !== false) $mime = $info['mime'];
     }
 
-    // v1.5.6：凭证图片存入数据库（原图 + GD 缩略图），不再写入 uploads/ 目录
+    // v1.7：凭证图片原图存入 uploads/receipts/ 文件，数据库只存缩略图+路径（减轻数据库体积）
     $full = file_get_contents($file['tmp_name']);
     if ($full === false || $full === '') {
             jsonOutput(['error' => '读取图片失败'], 500);
@@ -140,14 +140,28 @@ function handleUploadImage() {
             jsonOutput(['error' => '图片处理失败（服务器不支持该图片格式或 GD 不可用）'], 500);
     }
 
+    // 生成随机文件名（防猜测）并写入 uploads/receipts/
+    $dir = dirname(__DIR__) . '/uploads/receipts';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION)) ?: 'jpg';
+    $ext = preg_replace('/[^a-z0-9]/', '', $ext);
+    if (!in_array($ext, ['jpg','jpeg','png','gif','webp'], true)) $ext = 'jpg';
+    $fname = date('YmdHis') . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+    $fpath = $dir . '/' . $fname;
+    if (@file_put_contents($fpath, $full) === false) {
+            jsonOutput(['error' => '图片保存失败，请稍后重试'], 500);
+    }
+    $relPath = 'uploads/receipts/' . $fname;
+
     try {
-        $stmt = db()->prepare("INSERT INTO tx_images (transaction_id, seq, mime, thumb, full) VALUES (0, 0, :mime, :thumb, :full)");
+        $stmt = db()->prepare("INSERT INTO tx_images (transaction_id, seq, mime, thumb, full, full_path) VALUES (0, 0, :mime, :thumb, '', :fpath)");
         $stmt->bindValue(':mime', $mime);
         $stmt->bindValue(':thumb', $thumb, PDO::PARAM_LOB);
-        $stmt->bindValue(':full', $full, PDO::PARAM_LOB);
+        $stmt->bindValue(':fpath', $relPath);
         $stmt->execute();
         $imgId = (int)db()->lastInsertId();
         } catch (\Throwable $e) {
+            @unlink($fpath);
             jsonOutput(['error' => '图片保存失败，请稍后重试'], 500);
     }
 
@@ -163,13 +177,25 @@ function handleTxImage() {
     if ($id <= 0) jsonOutput(['error' => '无效图片 ID'], 400);
     $thumb = !empty($_GET['thumb']);
 
-    $stmt = db()->prepare("SELECT mime, thumb, full FROM tx_images WHERE id=:id");
+    $stmt = db()->prepare("SELECT mime, thumb, full, full_path FROM tx_images WHERE id=:id");
     $stmt->execute([':id' => $id]);
     $row = $stmt->fetch();
     if (!$row) jsonOutput(['error' => '图片不存在'], 404);
 
-    $data = $thumb ? $row['thumb'] : $row['full'];
     $mime = $row['mime'] ?: 'image/jpeg';
+    if ($thumb) {
+        // 缩略图始终从数据库读取（小体积）
+        $data = $row['thumb'];
+    } else {
+        // 原图优先从文件读取，旧数据（full 在 DB）回退
+        $data = '';
+        $p = $row['full_path'];
+        if (!empty($p)) {
+            $abs = dirname(__DIR__) . '/' . $p;
+            $data = (is_file($abs) && is_readable($abs)) ? file_get_contents($abs) : '';
+        }
+        if ($data === '' && !empty($row['full'])) $data = $row['full'];
+    }
     if (empty($data)) jsonOutput(['error' => '图片数据为空'], 404);
 
     header('Content-Type: ' . $mime);

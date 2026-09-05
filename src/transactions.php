@@ -84,6 +84,10 @@ function handleTransactionsGet() {
     $month  = $_GET['month'] ?? '';
     $search = trim($_GET['search'] ?? '');
     $id     = intval($_GET['id'] ?? 0);
+    $category = trim($_GET['category'] ?? '');
+    $amountMin = $_GET['amount_min'] !== '' ? floatval($_GET['amount_min'] ?? 0) : 0;
+    $amountMax = $_GET['amount_max'] !== '' ? floatval($_GET['amount_max'] ?? 0) : 0;
+    $recorder = trim($_GET['recorder'] ?? '');
     $page   = max(1, intval($_GET['page'] ?? 1));
     $perPage = min(1000, max(10, intval($_GET['per_page'] ?? 50)));
 
@@ -116,6 +120,30 @@ function handleTransactionsGet() {
         $countSql .= $where;
         $params[':s'] = "%{$search}%";
         $params[':s2'] = "%{$search}%";
+    }
+    if ($category !== '') {
+        $where = " AND t.category = :cat";
+        $sql .= $where;
+        $countSql .= $where;
+        $params[':cat'] = $category;
+    }
+    if ($amountMin > 0) {
+        $where = " AND t.amount >= :amin";
+        $sql .= $where;
+        $countSql .= $where;
+        $params[':amin'] = $amountMin;
+    }
+    if ($amountMax > 0) {
+        $where = " AND t.amount <= :amax";
+        $sql .= $where;
+        $countSql .= $where;
+        $params[':amax'] = $amountMax;
+    }
+    if ($recorder !== '') {
+        $where = " AND u.username LIKE :rec";
+        $sql .= $where;
+        $countSql .= $where;
+        $params[':rec'] = "%{$recorder}%";
     }
 
     // 总数
@@ -199,6 +227,18 @@ function handleTransactionsPost() {
     $exemptIdsJson = normalizeIdList($exemptIds);
 
     $user = currentUser();
+
+    // v1.8：重复交易提醒 —— 同类型+同金额+同描述 且 30天内 视为疑似重复（不阻止，仅提示）
+    $dupWarning = null;
+    try {
+        $dupStmt = db()->prepare("SELECT id, date, amount, description FROM transactions WHERE type=:t AND amount=:a AND deleted_at IS NULL AND description=:d AND date >= DATE_SUB(:dt, INTERVAL 30 DAY) AND id != :eid ORDER BY id DESC LIMIT 1");
+        $dupStmt->execute([':t' => $type, ':a' => $amount, ':d' => $desc, ':dt' => $date, ':eid' => intval($input['id'] ?? 0)]);
+        $dup = $dupStmt->fetch();
+        if ($dup) {
+            $dupWarning = ['id' => (int)$dup['id'], 'date' => $dup['date'], 'amount' => round((float)$dup['amount'], 2), 'description' => $dup['description']];
+        }
+    } catch (\Exception $e) { /* 检测失败不影响保存 */ }
+
     $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, date, description, payer_ids, exempt_ids, category, image_path, images, image_ids, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :d, :desc, :pids, :eids, :cat, :img, :imgs, :iids, :rb)");
     $stmt->execute([
         ':t'    => $type,
@@ -227,7 +267,7 @@ function handleTransactionsPost() {
         'type' => $type, 'amount' => $amount, 'date' => $date, 'description' => $desc
     ]);
 
-    jsonOutput(['ok' => true, 'id' => $newId], 201);
+    jsonOutput(['ok' => true, 'id' => $newId, 'dup_warning' => $dupWarning], 201);
 }
 
 /** PUT - 编辑收支记录 */

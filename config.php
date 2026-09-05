@@ -242,8 +242,8 @@ define('ROLES', json_encode([
 
 // 角色优先级权重（数值越小优先级越高，用于多角色取最高权限）
 define('ROLE_PRIORITY', json_encode([
-    'head_teacher' => 1,
-    'admin'        => 2,
+    'admin'        => 1,
+    'head_teacher' => 2,
     'monitor'      => 3,
     'vice_monitor' => 4,
     'finance'      => 5,

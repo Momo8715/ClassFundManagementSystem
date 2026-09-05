@@ -92,6 +92,9 @@ switch ($action) {
     case 'export_report':
         handleExportReport();
         break;
+    case 'export_report_pdf':
+        handleExportReportPdf();
+        break;
     case 'semesters':
         handleSemesters($method);
         break;

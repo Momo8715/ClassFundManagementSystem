@@ -44,11 +44,20 @@ function handleUsersGet() {
         requirePermission('manageStudents');
     }
     try {
-        $users = db()->query("SELECT id, username, roles, banned, ban_reason, created_at FROM users ORDER BY id")->fetchAll();
+        $users = db()->query("SELECT id, username, roles, banned, ban_reason, created_at FROM users")->fetchAll();
         foreach ($users as &$u) {
             $u['roles'] = sortRolesByPriority(normalizeRoles($u['roles']));
             $u['highest_role'] = getHighestRole($u['roles']);
         }
+        unset($u); // 释放引用，防止后续操作污染数组
+        // 按最高角色优先级排序（班主任→管理员→班长→副班长→财务→同学），同角色按 id
+        $priority = json_decode(ROLE_PRIORITY, true);
+        usort($users, function ($a, $b) use ($priority) {
+            $pa = $priority[$a['highest_role']] ?? 99;
+            $pb = $priority[$b['highest_role']] ?? 99;
+            if ($pa !== $pb) return $pa <=> $pb;
+            return $a['id'] <=> $b['id'];
+        });
         jsonOutput(['users' => $users]);
     } catch (\Throwable $e) {
         error_log('[班费系统] GET users 异常: ' . $e->getMessage());

@@ -115,7 +115,8 @@ CREATE TABLE IF NOT EXISTS `tx_images` (
   `seq`            INT NOT NULL DEFAULT 0 COMMENT '展示顺序',
   `mime`           VARCHAR(50) NOT NULL DEFAULT 'image/jpeg',
   `thumb`          MEDIUMBLOB NOT NULL COMMENT '缩略图(最长边400px,JPEG)',
-  `full`           MEDIUMBLOB NOT NULL COMMENT '原图',
+  `full`           MEDIUMBLOB NOT NULL COMMENT '原图(旧数据兼容,新图存文件)',
+  `full_path`      VARCHAR(500) NULL COMMENT '原图文件路径(新方案:uploads/receipts/)',
   `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY `idx_tx` (`transaction_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='凭证图片(数据库存储)';
