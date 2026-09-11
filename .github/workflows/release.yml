@@ -95,11 +95,14 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 先拉取最新 main，避免使用 checkout 时的旧引用（防止 tag 与 main 推送时序竞争）
+          git fetch origin main
           git checkout -B main origin/main
           cp /tmp/version.json.new version.json
           git add version.json
           if ! git diff --cached --quiet; then
             git commit -m "chore: 更新 version.json 至 ${{ steps.meta.outputs.version }}"
+            git rebase origin/main
             git push origin main
           else
             echo "version.json 无需变更"
