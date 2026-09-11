@@ -47,8 +47,23 @@ jobs:
         run: |
           zip -r update.zip . \
             -x "uploads/*" "backup_*/*" ".reasonix/*" ".git/*" \
-            -x "*.zip" ".github/*" ".env*" "deploy.sh" "deploy.bat" "*.md"
+            -x "*.zip" ".github/*" ".env*" "deploy.sh" "deploy.bat" "*.md" \
+            -x "_emoji_test.txt" "_up_probe.ps1" "db_config.json" "*.log"
           ls -lh update.zip
+          # 计算升级包 sha256 并写入待同步的 version.json，供客户端做完整性校验
+          SHA=$(sha256sum update.zip | awk '{print $1}')
+          echo "update.zip sha256: $SHA"
+          python3 - "$SHA" <<'EOF'
+          import json, sys
+          sha = sys.argv[1]
+          p = '/tmp/version.json.new'
+          with open(p, 'r', encoding='utf-8') as f:
+              data = json.load(f)
+          data['sha256'] = sha
+          with open(p, 'w', encoding='utf-8') as f:
+              json.dump(data, f, ensure_ascii=False)
+          print('version.json 已写入 sha256:', sha)
+          EOF
 
       - name: 生成更新说明
         id: notes

@@ -6,7 +6,7 @@
 
 > 上传即用 · 无需命令行 · 宝塔面板友好 · 支持远程一键升级
 
-[![版本](https://img.shields.io/badge/版本-v1.6.2-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
+[![版本](https://img.shields.io/badge/版本-v1.7.2-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
 [![PHP](https://img.shields.io/badge/PHP-8.0%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net)
 [![MySQL](https://img.shields.io/badge/MySQL-5.7%2B-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com)
 [![Status](https://img.shields.io/badge/状态-稳定-22c55e?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem)
@@ -129,7 +129,9 @@ class-fund-system/
 │   ├── logs.php           # 操作日志
 │   ├── security.php       # 安全分析 / 回收站
 │   ├── upgrade.php        # 远程升级
-│   └── helpers.php        # CSRF / 速率限制 / XSS 防护
+│   ├── tfpdf.php          # PDF 生成库（tFPDF，支持中文）
+│   ├── font/unifont/      # 文泉驿中文字体 + 预生成字体指标
+│   └── helpers.php        # CSRF / 速率限制 / 输入校验 / 导出辅助
 └── uploads/               # 凭证图片（自动创建）
 ```
 
@@ -144,13 +146,31 @@ class-fund-system/
 | 🔐 CSRF 防护 | 每次会话生成随机 Token，写操作强制校验 |
 | 👤 会话安全 | 登录后重新生成 Session ID（防会话固定攻击） |
 | ⏱️ 速率限制 | 登录接口每 IP 每分钟限 5 次，文件锁原子计数 |
-| 🧹 XSS 防护 | 前端统一 `escapeHtml`，后端存储前校验 |
+| 🧹 XSS 防护 | 前端内容统一转义（含引号）+ 图片 URL 协议白名单，后端输入校验与长度限制 |
 | 📜 操作日志 | 应用层**永不执行** UPDATE/DELETE，审计不可篡改 |
 | 🖥️ 登录审计 | 每次登录尝试均记录 IP / UA / 浏览器指纹 / 失败原因 |
-| 🔍 异常检测 | 同指纹多账号、同账号多 IP、暴力破解统计 |
+| 🔍 异常检测 | 同指纹多账号、同账号多 IP、同 IP 多账号、暴力破解统计 |
+| 🚫 IP 黑名单 | 一键封禁可疑 IP，API 层强制拦截；失败原因分布与安全事件流 |
+| 🧾 安全事件 | CSRF 失败 / 非法上传 / 被拦截访问等落库留痕，面板可查 |
+| 📊 安全审计 | 24h/7天/30天/全部筛选 · 用户安全画像 · 登录时段分布 · 新 IP 登录 · 登录明细分页下钻 · CSV 导出 |
+| 🧬 设备指纹 | 浏览器/系统/分辨率/时区/核心数哈希指纹（24 位十六进制），用于同指纹多账号检测 |
 | 🗑️ 软删除 | 收支记录删除进回收站，可恢复，防误删 |
 | 🖼️ 上传安全 | 图片按 MIME 签名校验，扩展名白名单，目录禁执行脚本 |
 | 🚫 权限矩阵 | 10+ 项细粒度权限，多角色取最高优先级 |
+| 📦 升级安全 | 升级包来源白名单 + 可选 sha256 完整性校验 + 下载/解压体积上限 |
+| 🔒 敏感文件 | `.htaccess` 随仓库发布并封禁 `db_config.json` / `config.php` / `schema.sql` / `backup_*` |
+
+### 🌐 nginx 部署必读（宝塔默认使用 nginx）
+
+`.htaccess` 只对 Apache 生效。nginx 站点请务必在 **网站 → 配置文件** 的 `server {}` 中加入：
+
+```nginx
+# 禁止下载数据库配置与建表脚本，禁止访问升级备份目录
+location ~* (db_config\.json|config\.php|schema\.sql)$ { return 404; }
+location ^~ /backup_ { return 404; }
+```
+
+否则 `db_config.json`（含数据库账号密码）可能被直接下载。
 
 ---
 
@@ -164,7 +184,8 @@ GitHub Release → 下载 ZIP → 全站自动备份 → 解压覆盖 → 完成
 
 - ✅ 升级前自动备份到 `backup_日期/`，出问题随时回滚
 - ✅ 不影响 `uploads/` 凭证图片与 `db_config.json` 数据库配置
-- ✅ 升级地址硬编码，无法被篡改劫持
+- ✅ 升级包来源白名单校验（仅允许本仓库 Releases），并在 `version.json` 提供 `sha256` 时强制校验完整性
+- ✅ 下载/解压均有体积上限，防止内存耗尽与 zip 炸弹
 
 📖 详细发布教程见 [UPGRADE.md](UPGRADE.md)
 
@@ -174,6 +195,10 @@ GitHub Release → 下载 ZIP → 全站自动备份 → 解压覆盖 → 完成
 
 | 版本 | 说明 |
 |:---:|------|
+| **v1.7.3（待发布）** | 🛡️ 安全加固：敏感文件防护/升级包校验/前端 XSS 修复 · PDF 中文修复 · 迁移与会话修复 |
+| **v1.7.2** | 🐛 修复 undefined array key 警告 |
+| **v1.7.1** | 🐛 修复升级权限问题 |
+| **v1.7.0** | ✨ 新功能：多图凭证 / 单次免缴 / 学期报表 PDF / 数据看板 |
 | **v1.6.2** | 🚀 Cloudflare 缓存加速 · 界面视觉升级 + 多设备响应式 · API no-store · 前端错误重试 |
 | **v1.6.1** | 🔧 修复与体验优化 |
 | **v1.6** | ✨ 新功能版本 |

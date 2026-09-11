@@ -1,0 +1,18 @@
+第三方组件与字体许可声明
+==========================
+
+1) tFPDF (src/tfpdf.php, src/font/unifont/ttfonts.php)
+   版本: 1.33 (based on FPDF 1.85)
+   Authors: Ian Back <ianb@bpm1.com>, Tycho Veltmeijer <tfpdf@tychoveltmeijer.nl>
+   License: LGPL-2.1
+   来源: https://github.com/Setasign/tFPDF
+
+2) 文泉驿微米黑 WenQuanYi Micro Hei (src/font/unifont/wqy-microhei.ttf)
+   Version 0.2.0-beta
+   Copyright (c) 2007 Google Corporation;
+   Copyright (c) 2008-2009 WenQuanYi Board of Trustees (http://wenq.org/) and Qianqian Fang
+   License: Apache License, Version 2.0
+   http://www.apache.org/licenses/LICENSE-2.0
+
+注: 字体指标缓存 wqy-microhei.mtx.php / wqy-microhei.cw.dat / wqy-microhei.cw127.php
+    由 tFPDF 依据上述 TTF 预生成，用于避免运行时解析字体。

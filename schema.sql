@@ -120,3 +120,27 @@ CREATE TABLE IF NOT EXISTS `tx_images` (
   `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   KEY `idx_tx` (`transaction_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='凭证图片(数据库存储)';
+
+-- 登录 IP 黑名单（命中后 API 层直接拒绝）
+CREATE TABLE IF NOT EXISTS `blocked_ips` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `ip`         VARCHAR(45)  NOT NULL COMMENT 'IPv4/IPv6',
+  `reason`     VARCHAR(200) DEFAULT NULL COMMENT '封禁原因',
+  `created_by` INT DEFAULT NULL COMMENT '操作管理员ID',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_ip` (`ip`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='登录 IP 黑名单';
+
+-- 安全事件日志（CSRF 失败/非法上传/被拦截 IP 等）
+CREATE TABLE IF NOT EXISTS `security_events` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `event`      VARCHAR(100) NOT NULL COMMENT '事件类型',
+  `detail`     VARCHAR(500) DEFAULT NULL COMMENT '事件详情(JSON/文本)',
+  `ipv4`       VARCHAR(45)  DEFAULT NULL,
+  `ipv6`       VARCHAR(45)  DEFAULT NULL,
+  `username`   VARCHAR(50)  DEFAULT NULL COMMENT '触发时的登录用户名(如有)',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY `idx_created` (`created_at`),
+  KEY `idx_event` (`event`),
+  KEY `idx_ip` (`ipv4`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='安全事件日志';

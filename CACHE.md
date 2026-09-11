@@ -133,3 +133,19 @@ curl -sI https://classfund.hw.陌沫.cn/assets/css/style.css | grep -i 'cf-cache
 - `api.php`：新增 API no-store 响应头
 - `.htaccess`：补充静态资源浏览器缓存段（Apache/虚拟主机场景）
 - `CACHE.md`：本文档
+
+---
+
+## 六、2026-09-11 敏感文件泄露修复（重要）
+
+**问题**：`https://classfund.陌沫.cn/db_config.json` 曾被公网匿名下载（HTTP 200，含数据库密码），
+且被 Cloudflare 按"无 Cookie HTML"缓存规则缓存 12h（源站修复后边缘仍返回旧包）。
+
+**已处理**：
+1. `/www/server/panel/vhost/nginx/classfund.xn--gvwz10g.cn.conf`：
+   - 敏感文件黑名单加入 `db_config\.json`
+   - 新增 `location ^~ /backup_ { return 404; }`（站内升级备份目录曾可访问其 `install.php`）
+2. Cloudflare 两个 zone 全量 purge（定向 purge 对该对象无效）。
+3. 项目侧：`.htaccess` 纳入版本控制并封禁 `db_config.json`/`backup_*`；`install.php` 改用 `isDbInstalled()` 判定。
+
+**待办**：`db_config.json` 中的数据库密码曾公网可读，应尽快轮换。

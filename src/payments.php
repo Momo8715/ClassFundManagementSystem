@@ -75,6 +75,7 @@ function handleRosterTemplate() {
 /** xlsx 上传花名册 */
 function handleRosterXlsx() {
     requirePermission('manageRoster');
+    requireCsrfToken();
 
     if (empty($_FILES['xlsx'])) jsonOutput(['error' => '请选择 xlsx 文件'], 400);
     if (!class_exists('ZipArchive')) jsonOutput(['error' => '服务器未安装 PHP Zip 扩展'], 500);

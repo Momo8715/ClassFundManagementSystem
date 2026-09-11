@@ -79,7 +79,7 @@ function handleExportLogs() {
     ];
 
     header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="operation_logs_' . date('Ymd_His') . '.csv"');
+    header('Content-Disposition: ' . contentDisposition('operation_logs_' . date('Ymd_His') . '.csv'));
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM，兼容 Excel
     fputcsv($out, ['ID', '时间', '用户', '操作', '对象', '目标ID', '详情', 'IP', '浏览器']);
@@ -89,7 +89,7 @@ function handleExportLogs() {
             $d = json_decode($detail, true);
             if (is_array($d)) $detail = json_encode($d, JSON_UNESCAPED_UNICODE);
         }
-        fputcsv($out, [
+        fputcsv($out, array_map('csvSafe', [
             $log['id'],
             $log['created_at'],
             $log['username'],
@@ -99,7 +99,7 @@ function handleExportLogs() {
             $detail,
             $log['ip_address'] ?? '',
             $log['browser_info'] ?? '',
-        ]);
+        ]));
     }
     fclose($out);
     exit;

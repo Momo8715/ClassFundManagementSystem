@@ -106,7 +106,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     </script>
     <!-- 预加载关键资源：提前建立连接/加载JS，减少等待 -->
     <link rel="preload" href="assets/css/style.css?v=17" as="style">
-    <link rel="preload" href="assets/js/app.js?v=29" as="script">
+    <link rel="preload" href="assets/js/app.js?v=32" as="script">
     <link rel="preconnect" href="/" crossorigin>
     <script data-cfasync="false">
     // 防止 app.js 未就绪时点击登录报错：按钮先禁用，JS 加载后启用
@@ -390,12 +390,77 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <button class="btn btn-outline btn-sm" onclick="renderSecurity()">🔄 刷新</button>
                 </div>
                 <div class="cards" id="securitySummary"></div>
+                <div class="toolbar" style="flex-wrap:wrap;margin:14px 0 6px">
+                    <span style="font-size:12px;color:var(--text-secondary)">统计范围</span>
+                    <select id="secRange" onchange="window._secReload(1)">
+                        <option value="24h">近24小时</option>
+                        <option value="7d" selected>近7天</option>
+                        <option value="30d">近30天</option>
+                        <option value="all">全部时间</option>
+                    </select>
+                    <select id="secFUser"><option value="0">全部用户</option></select>
+                    <select id="secFResult">
+                        <option value="">全部结果</option>
+                        <option value="ok">仅成功</option>
+                        <option value="fail">仅失败</option>
+                    </select>
+                    <input type="text" id="secFkw" placeholder="用户名 / IP / 失败原因">
+                    <input type="hidden" id="secFip">
+                    <button class="btn btn-primary btn-sm" onclick="window._secReload(1)">🔍 查询</button>
+                    <button class="btn btn-outline btn-sm" onclick="window._secReset()">↺ 重置</button>
+                    <button class="btn btn-outline btn-sm" onclick="window._secExport()">📥 导出审计 CSV</button>
+                </div>
                 <h4 style="margin-bottom:8px;color:var(--danger)">🔍 同指纹多账号</h4>
                 <div class="table-wrap" id="multiAccountTable"></div>
                 <h4 style="margin:16px 0 8px;color:#f59e0b">🌍 同账号多IP</h4>
                 <div class="table-wrap" id="multiIpTable"></div>
                 <h4 style="margin:16px 0 8px;color:var(--danger)">🚨 登录失败统计</h4>
                 <div class="table-wrap" id="failuresTable"></div>
+
+                <!-- ===== 安全增强（v1.8） ===== -->
+                <div class="cards" id="secSummaryExtra" style="margin-top:16px"></div>
+
+                <h4 style="margin:16px 0 8px;color:var(--danger)">🚫 可疑 IP（失败 ≥ 3 次）</h4>
+                <div class="table-wrap" id="ipRiskTable"></div>
+
+                <h4 style="margin:16px 0 8px;color:#f59e0b">🧭 同 IP 多账号</h4>
+                <div class="table-wrap" id="ipMultiAccountTable"></div>
+
+                <h4 style="margin:16px 0 8px;color:var(--text-secondary)">📉 登录失败原因分布</h4>
+                <div class="table-wrap" id="failReasonTable"></div>
+
+                <h4 style="margin:16px 0 8px;color:var(--danger)">⛔ IP 黑名单</h4>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+                    <input type="text" id="blockIpInput" placeholder="要封禁的 IP，如 1.2.3.4" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:200px">
+                    <input type="text" id="blockIpReason" placeholder="原因（可选）" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:180px">
+                    <button class="btn btn-danger btn-sm" onclick="window._blockIp()">⛔ 封禁 IP</button>
+                    <span style="font-size:11px;color:var(--text-secondary)">命中黑名单的 IP 将被 API 层直接拒绝</span>
+                </div>
+                <div class="table-wrap" id="blockedIpTable"></div>
+
+                <h4 style="margin:16px 0 8px;color:#f59e0b">🚷 已封禁账号</h4>
+                <div class="table-wrap" id="bannedUsersTable"></div>
+
+                <h4 style="margin:16px 0 8px;color:var(--primary)">🧾 安全事件（最近 50 条）</h4>
+                <div class="table-wrap" id="securityEventsTable"></div>
+
+                <!-- ===== 安全细化（v1.8） ===== -->
+                <h4 style="margin:16px 0 8px;color:var(--primary)">🧮 风险评分构成</h4>
+                <div class="table-wrap" id="riskBreakdown"></div>
+
+                <h4 style="margin:16px 0 8px;color:var(--primary)">👤 用户安全画像</h4>
+                <div class="table-wrap" id="userProfileTable"></div>
+
+                <h4 style="margin:16px 0 8px;color:var(--primary)">🕒 登录时段分布（0-23 时）</h4>
+                <div class="table-wrap" id="hourlyTable"></div>
+
+                <h4 style="margin:16px 0 8px;color:#f59e0b">🆕 新 IP 登录（该账号首次出现的 IP）</h4>
+                <div class="table-wrap" id="newIpTable"></div>
+
+                <h4 style="margin:16px 0 8px;color:var(--primary)">📋 登录明细（可按范围/用户/结果/IP 筛选）</h4>
+                <div class="table-wrap" id="loginDetailTable"></div>
+                <div class="pagination" id="loginDetailPagination"></div>
+
                 <h4 style="margin:16px 0 8px;color:var(--primary)">🔄 远程升级</h4>
                 <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);margin-bottom:8px">
                     <button class="btn btn-primary btn-sm" onclick="checkUpdate()">🔍 检查更新</button>
@@ -531,13 +596,15 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
             'username' => $_SESSION['username'],
             'roles' => $_SESSION['roles'] ?? [],
             'is_guest' => $_SESSION['is_guest'] ?? false,
-        ], JSON_UNESCAPED_UNICODE); ?>;
-        window._initialCsrf = <?php echo json_encode($_SESSION['csrf_token'] ?? ''); ?>;
+        ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        window._initialCsrf = <?php echo json_encode($_SESSION['csrf_token'] ?? '', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     </script>
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=29" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=29')"></script>
+    <script src="assets/js/app.js?v=32" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=32')"></script>
+    <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
+    <script src="assets/js/security.js?v=2" defer data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">

@@ -4,7 +4,7 @@
 
 系统内置了远程升级功能，所有部署了「班级班费管理系统」的站点，管理员在后台点"检查更新"→"立即升级"，即可自动从你的 GitHub 仓库下载最新版本并覆盖安装（升级前会自动备份全站文件）。
 
-**升级服务器地址已写死在代码中，其他人无法篡改。**
+**升级包来源受白名单限制（仅允许本仓库 Releases 资产），并通过 `version.json` 中的 `sha256` 校验完整性；即使 version.json 被劫持改为第三方地址，也会被拒绝。**
 
 ---
 
@@ -25,7 +25,10 @@
 打包命令（在项目根目录执行）：
 
 ```bash
-zip -r update.zip . -x "uploads/*" "backup_*/*" ".reasonix/*" ".git/*" "*.zip"
+zip -r update.zip . -x "uploads/*" "backup_*/*" ".reasonix/*" ".git/*" "*.zip" \
+  -x ".github/*" ".env*" "deploy.sh" "deploy.bat" "*.md" "_emoji_test.txt"
+# 计算 sha256（写入 version.json，供客户端完整性校验）
+sha256sum update.zip
 ```
 
 > 💡 **推荐：使用 GitHub Actions 自动打包发布**
@@ -121,4 +124,6 @@ chmod -R 755 /var/www/你的站点目录
 - 各站点的数据库配置（`db_config.json`）不受升级影响
 - `uploads/` 目录下的凭证图片不会被覆盖
 - 升级前自动备份，出问题可随时回滚
-- 升级地址 `https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json` 已硬编码，无法篡改
+- 版本信息地址硬编码为 `https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json`（国内自动走 ghfast.top 代理，失败回退直连）
+- 升级包地址必须落在本仓库 Releases 白名单内；`version.json` 中的 `sha256` 会与下载内容比对，校验失败立即中止
+- 下载与解压均有体积上限，防止内存耗尽 / zip 炸弹

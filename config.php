@@ -37,26 +37,20 @@ define('DB_USER',   $_db_cfg['DB_USER']);
 define('DB_PASS',   $_db_cfg['DB_PASS']);
 define('DB_CHARSET', $_db_cfg['DB_CHARSET']);
 
-/** 检测数据库是否已配置并可连接（不抛异常） */
+/** 检测数据库是否已配置并可连接（复用 db() 单例，避免每次请求重复建连） */
 function isDbConnected(): bool {
     try {
-        $dsn = 'mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET;
-        $pdo = new PDO($dsn, DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-        $pdo->query("SELECT 1");
+        db()->query("SELECT 1");
         return true;
     } catch (Exception $e) {
         return false;
     }
 }
 
-/** 检测数据表是否已创建 */
+/** 检测数据表是否已创建（复用 db() 单例） */
 function isDbInstalled(): bool {
-    if (!isDbConnected()) return false;
     try {
-        $dsn = 'mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET;
-        $pdo = new PDO($dsn, DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-        $tables = $pdo->query("SHOW TABLES LIKE 'users'")->rowCount();
-        return $tables > 0;
+        return (int)db()->query("SHOW TABLES LIKE 'users'")->rowCount() > 0;
     } catch (Exception $e) {
         return false;
     }
@@ -199,10 +193,40 @@ function autoMigrate(): void {
             seq INT NOT NULL DEFAULT 0 COMMENT '展示顺序',
             mime VARCHAR(50) NOT NULL DEFAULT 'image/jpeg',
             thumb MEDIUMBLOB NOT NULL COMMENT '缩略图(最长边400px,JPEG)',
-            full MEDIUMBLOB NOT NULL COMMENT '原图',
+            full MEDIUMBLOB NOT NULL COMMENT '原图(旧数据兼容,新图存文件)',
+            full_path VARCHAR(500) DEFAULT NULL COMMENT '原图文件路径(新方案:uploads/receipts/)',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             KEY idx_tx (transaction_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='凭证图片(数据库存储)'");
+
+        // tx_images.full_path（v1.7 新增：原图改存 uploads/receipts/ 文件，数据库只存缩略图+路径）
+        // 注意：老版本升级时会走到这里补列；缺少此迁移会导致保存凭证图片报 Unknown column 'full_path'
+        $tiCols = $db->query("SHOW COLUMNS FROM tx_images")->fetchAll(PDO::FETCH_COLUMN);
+        if (!in_array('full_path', $tiCols)) $db->exec("ALTER TABLE tx_images ADD COLUMN full_path VARCHAR(500) DEFAULT NULL COMMENT '原图文件路径' AFTER full");
+
+        // blocked_ips 登录 IP 黑名单（v1.8）
+        $db->exec("CREATE TABLE IF NOT EXISTS blocked_ips (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            ip VARCHAR(45) NOT NULL COMMENT 'IPv4/IPv6',
+            reason VARCHAR(200) DEFAULT NULL COMMENT '封禁原因',
+            created_by INT DEFAULT NULL COMMENT '操作管理员ID',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_ip (ip)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='登录 IP 黑名单'");
+
+        // security_events 安全事件日志（v1.8）
+        $db->exec("CREATE TABLE IF NOT EXISTS security_events (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            event VARCHAR(100) NOT NULL COMMENT '事件类型',
+            detail VARCHAR(500) DEFAULT NULL COMMENT '事件详情',
+            ipv4 VARCHAR(45) DEFAULT NULL,
+            ipv6 VARCHAR(45) DEFAULT NULL,
+            username VARCHAR(50) DEFAULT NULL COMMENT '触发时的登录用户名(如有)',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_created (created_at),
+            KEY idx_event (event),
+            KEY idx_ip (ipv4)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='安全事件日志'");
 
         // semesters 学期表
         $db->exec("CREATE TABLE IF NOT EXISTS semesters (
@@ -228,7 +252,7 @@ define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
 // 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
 // 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
-define('SCHEMA_VERSION', '1.6');
+define('SCHEMA_VERSION', '1.8');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([
@@ -332,6 +356,9 @@ function startSession() {
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
+        // 服务端会话有效期与 Cookie 对齐（PHP 默认 gc_maxlifetime=1440s 会提前回收会话，导致频繁掉线）
+        @ini_set('session.gc_maxlifetime', (string)SESSION_TIMEOUT);
+        @ini_set('session.cookie_lifetime', (string)SESSION_TIMEOUT);
         session_start();
     }
 }
@@ -371,22 +398,46 @@ function requireLogin() {
         echo json_encode(['error' => '请先登录']);
         exit;
     }
-    // 封禁检查：被封禁用户的已有会话立即失效（防止封禁形同虚设）
+    // 封禁检查：被封禁用户的已有会话失效（状态缓存 60 秒，兼顾生效速度与查询开销）
     $uid = (int)($_SESSION['user_id'] ?? 0);
     if ($uid > 0) {
-        try {
-            $stmt = db()->prepare("SELECT banned FROM users WHERE id=:id");
-            $stmt->execute([':id' => $uid]);
-            if ((int)$stmt->fetchColumn() === 1) {
-                $_SESSION = [];
-                session_destroy();
-                http_response_code(403);
-                echo json_encode(['error' => '账号已被管理员限制登录']);
-                exit;
+        $checkedAt = (int)($_SESSION['ban_checked_at'] ?? 0);
+        if ($checkedAt + 60 < time()) {
+            try {
+                $stmt = db()->prepare("SELECT banned FROM users WHERE id=:id");
+                $stmt->execute([':id' => $uid]);
+                $_SESSION['banned'] = ((int)$stmt->fetchColumn() === 1);
+                $_SESSION['ban_checked_at'] = time();
+            } catch (\Exception $e) {
+                // 数据库异常时不阻断请求
             }
-        } catch (\Exception $e) {
-            // 数据库异常时不阻断请求
         }
+        if (!empty($_SESSION['banned'])) {
+            $_SESSION = [];
+            session_destroy();
+            http_response_code(403);
+            echo json_encode(['error' => '账号已被管理员限制登录']);
+            exit;
+        }
+    }
+}
+
+/** IP 黑名单拦截：命中则直接 403（API 层全局校验） */
+function requireNotBlockedIp(): void {
+    try {
+        [$ipv4, $ipv6] = getClientIPs();
+        $ip = $ipv4 ?: $ipv6;
+        if ($ip === '') return;
+        $stmt = db()->prepare("SELECT 1 FROM blocked_ips WHERE ip=:ip LIMIT 1");
+        $stmt->execute([':ip' => $ip]);
+        if ($stmt->fetchColumn()) {
+            securityLog('blocked_ip_access', ['ip' => $ip, 'uri' => $_SERVER['REQUEST_URI'] ?? '']);
+            http_response_code(403);
+            echo json_encode(['error' => '您的 IP 已被限制访问，请联系管理员'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    } catch (Exception $e) {
+        // 表缺失 / 数据库异常时不阻断请求
     }
 }
 
@@ -503,8 +554,24 @@ function addLog(int $userId, string $username, string $action, string $targetTyp
     }
 }
 
+/** 登录历史保留天数（操作日志 operation_logs 仍永久保留，不在清理范围） */
+define('LOGIN_HISTORY_RETENTION_DAYS', 180);
+
+/** 低频清理登录历史：每天最多执行一次，避免 login_history 表无限增长 */
+function pruneLoginHistoryIfDue(): void {
+    try {
+        $today = date('Y-m-d');
+        if (getMeta('login_history_pruned_on') === $today) return;
+        setMeta('login_history_pruned_on', $today);
+        db()->exec("DELETE FROM login_history WHERE created_at < (NOW() - INTERVAL " . (int)LOGIN_HISTORY_RETENTION_DAYS . " DAY)");
+    } catch (\Exception $e) {
+        // 清理失败不影响登录流程
+    }
+}
+
 /** 记录登录历史（每次登录尝试都记录，成功/失败均可审计） */
 function addLoginHistory(int $userId, string $username, string $loginType, bool $success, string $failReason = '', string $fingerprint = '') {
+    pruneLoginHistoryIfDue();
     try {
         [$ipv4, $ipv6] = getClientIPs();
         $ua   = $_SERVER['HTTP_USER_AGENT'] ?? '';

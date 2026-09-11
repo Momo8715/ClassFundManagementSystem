@@ -93,8 +93,6 @@ function makeImageThumbnail(string $data, int $maxEdge = 400): ?string {
 }
 
 function handleUploadImage() {
-    $dbg = __DIR__ . '/../uploads/_up_debug.log';
-
     requirePermission('addTransaction');
     requireCsrfToken();
 
@@ -198,6 +196,7 @@ function handleTxImage() {
     }
     if (empty($data)) jsonOutput(['error' => '图片数据为空'], 404);
 
+    header('X-Content-Type-Options: nosniff');
     header('Content-Type: ' . $mime);
     header('Content-Length: ' . strlen($data));
     // 凭证图片入库后不可变，允许浏览器/CDN 缓存 1 天
@@ -219,6 +218,7 @@ function handleDownloadTemplate() {
 // ==================== xlsx 上传解析 ====================
 function handleUploadXlsx() {
     requirePermission('importData');
+    requireCsrfToken();
 
     if (empty($_FILES['xlsx'])) {
         jsonOutput(['error' => '请选择 xlsx 文件'], 400);
@@ -493,11 +493,11 @@ function handleReceipt() {
         <h1>' . $title . '</h1>
         <div class="no">编号：<b>CF-' . str_pad((string)$tx['id'], 6, '0', STR_PAD_LEFT) . '</b></div>
         <table>
-            <tr><td class="label">日期</td><td>' . htmlspecialchars($tx['date']) . '</td><td class="label">类型</td><td>' . ($isIncome ? '收入（缴款）' : '支出') . '</td></tr>
-            <tr><td class="label">金额（大写）</td><td colspan="3" class="cn">' . htmlspecialchars($amountCN) . '</td></tr>
+            <tr><td class="label">日期</td><td>' . escapeHtml($tx['date']) . '</td><td class="label">类型</td><td>' . ($isIncome ? '收入（缴款）' : '支出') . '</td></tr>
+            <tr><td class="label">金额（大写）</td><td colspan="3" class="cn">' . escapeHtml($amountCN) . '</td></tr>
             <tr><td class="label">金额（小写）</td><td colspan="3" class="amount">¥ ' . number_format((float)$tx['amount'], 2, '.', ',') . '</td></tr>
-            <tr><td class="label">事由</td><td colspan="3">' . htmlspecialchars($tx['description']) . '</td></tr>
-            <tr><td class="label">分类</td><td>' . htmlspecialchars($tx['category']) . ($tx['sub_category'] ? ' / ' . htmlspecialchars($tx['sub_category']) : '') . '</td><td class="label">经办人</td><td>' . htmlspecialchars($tx['recorder_name'] ?? '') . '</td></tr>
+            <tr><td class="label">事由</td><td colspan="3">' . escapeHtml($tx['description']) . '</td></tr>
+            <tr><td class="label">分类</td><td>' . escapeHtml($tx['category']) . ($tx['sub_category'] ? ' / ' . escapeHtml($tx['sub_category']) : '') . '</td><td class="label">经办人</td><td>' . escapeHtml($tx['recorder_name'] ?? '') . '</td></tr>
         </table>
         <div class="footer">
             <div class="box"><div class="line"></div><div class="cap">缴款 / 经手人</div></div>
@@ -551,7 +551,7 @@ function outputSimpleXlsx(string $filename, string $sheetName, array $headers, a
     $zip->close();
 
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    header('Content-Disposition: attachment; filename="' . $filename . '.xlsx"');
+    header('Content-Disposition: ' . contentDisposition($filename . '.xlsx'));
     header('Content-Length: ' . filesize($tmpFile));
     header('Cache-Control: no-cache');
     readfile($tmpFile);
@@ -763,7 +763,7 @@ function outputStyledXlsx(string $filename, string $sheetName, array $colWidths,
     $zip->close();
 
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    header('Content-Disposition: attachment; filename="' . $filename . '.xlsx"');
+    header('Content-Disposition: ' . contentDisposition($filename . '.xlsx'));
     header('Content-Length: ' . filesize($tmpFile));
     header('Cache-Control: no-cache');
     readfile($tmpFile);

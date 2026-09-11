@@ -1,6 +1,12 @@
 <?php
 /**
  * 班级班费管理系统 - 远程升级模块
+ *
+ * 安全设计：
+ *  - 升级包地址必须落在本仓库 Releases 白名单内（允许 ghfast.top 代理前缀），
+ *    防止远端 version.json 被篡改后指向任意地址；
+ *  - version.json 若提供 sha256，则强校验升级包完整性；
+ *  - 下载与解压均有体积上限，避免内存耗尽 / zip 炸弹。
  */
 
 /** 国内可访问的 GitHub 代理前缀（ghfast.top 已在服务器实测可用；GitHub 直连国内不通） */
@@ -9,6 +15,74 @@ function githubProxy(string $url): string {
         return 'https://ghfast.top/' . $url;
     }
     return $url;
+}
+
+/** 读取远程文本，失败返回 null */
+function upgradeHttpGet(string $url, int $timeout = 10): ?string {
+    $ctx = stream_context_create(['http' => [
+        'timeout'        => $timeout,
+        'user_agent'     => 'ClassFund-Updater/1.0',
+        'follow_location'=> 1,
+        'max_redirects'  => 3,
+    ]]);
+    $data = @file_get_contents($url, false, $ctx);
+    return ($data === false || $data === '') ? null : $data;
+}
+
+/** 获取远端 version.json（代理优先，直连兜底） */
+function fetchRemoteVersion(): ?array {
+    $raw = 'https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json';
+    foreach (array_unique([githubProxy($raw), $raw]) as $u) {
+        $json = upgradeHttpGet($u, 10);
+        if ($json !== null) {
+            $d = json_decode($json, true);
+            if (is_array($d) && !empty($d['version'])) return $d;
+        }
+    }
+    return null;
+}
+
+/** 升级包来源白名单：必须是本仓库 Releases 下的资产（可带 ghfast.top 代理前缀） */
+function isAllowedUpgradeUrl(string $url): bool {
+    $prefixes = [
+        'https://github.com/Momo8715/ClassFundManagementSystem/releases/download/',
+        'https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/',
+    ];
+    $cands = [$url];
+    if (strpos($url, 'https://ghfast.top/') === 0) {
+        $cands[] = substr($url, strlen('https://ghfast.top/'));
+    }
+    foreach ($cands as $u) {
+        foreach ($prefixes as $p) {
+            if (strpos($u, $p) === 0) return true;
+        }
+    }
+    return false;
+}
+
+/** 下载升级包：代理优先 → 直连兜底；带上限（默认 50MB），校验 PK 头 */
+function downloadUpgradeZip(string $url, int $maxBytes = 52428800): ?string {
+    foreach (array_unique([githubProxy($url), $url]) as $u) {
+        $ctx = stream_context_create(['http' => [
+            'timeout'        => 120,
+            'user_agent'     => 'ClassFund-Updater/1.0',
+            'follow_location'=> 1,
+            'max_redirects'  => 3,
+        ]]);
+        $fp = @fopen($u, 'rb', false, $ctx);
+        if (!$fp) continue;
+        $data = '';
+        $ok = true;
+        while (!feof($fp)) {
+            $chunk = fread($fp, 262144);
+            if ($chunk === false) { $ok = false; break; }
+            $data .= $chunk;
+            if (strlen($data) > $maxBytes) { $ok = false; break; }
+        }
+        fclose($fp);
+        if ($ok && $data !== '' && substr($data, 0, 2) === 'PK') return $data;
+    }
+    return null;
 }
 
 function handleUpgrade(string $method) {
@@ -28,28 +102,21 @@ function handleUpgrade(string $method) {
 
 /** 检查远程版本 */
 function checkUpdate() {
-    $remoteUrl = githubProxy('https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json');
-    $local = json_decode(file_get_contents(__DIR__ . '/../version.json'), true);
+    $local = json_decode(@file_get_contents(__DIR__ . '/../version.json'), true);
     $currentVersion = $local['version'] ?? '0.0.0';
 
-    $ctx = stream_context_create(['http' => ['timeout' => 10]]);
-    $json = @file_get_contents($remoteUrl, false, $ctx);
-    if (!$json) {
-        jsonOutput(['error' => '无法连接远程更新服务器'], 503);
-    }
-
-    $remote = json_decode($json, true);
-    if (!$remote || empty($remote['version'])) {
-        jsonOutput(['error' => '远程版本信息无效'], 500);
+    $remote = fetchRemoteVersion();
+    if (!$remote) {
+        jsonOutput(['error' => '无法连接远程更新服务器或版本信息无效'], 503);
     }
 
     $hasUpdate = version_compare($remote['version'], $currentVersion, '>');
     jsonOutput([
-        'current'  => $currentVersion,
-        'remote'   => $remote['version'],
+        'current'   => $currentVersion,
+        'remote'    => $remote['version'],
         'hasUpdate' => $hasUpdate,
-        'notes'    => $remote['notes'] ?? '',
-        'url'      => $remote['url'] ?? '',
+        'notes'     => $remote['notes'] ?? '',
+        'url'       => $remote['url'] ?? '',
     ]);
 }
 
@@ -124,29 +191,39 @@ function doUpgrade() {
 
     set_time_limit(120);
 
-    // 先从远程获取版本信息和下载地址
-    $remoteUrl = githubProxy('https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json');
-    $ctx = stream_context_create(['http' => ['timeout' => 10]]);
-    $json = @file_get_contents($remoteUrl, false, $ctx);
-    if (!$json) jsonOutput(['error' => '无法连接远程更新服务器'], 503);
+    // ---- 远端版本（带来源校验） ----
+    $remote = fetchRemoteVersion();
+    if (!$remote) jsonOutput(['error' => '无法获取远程版本信息（网络不可达或版本信息无效）'], 503);
 
-    $remote = json_decode($json, true);
-    if (!$remote || empty($remote['version'])) jsonOutput(['error' => '远程版本信息无效'], 500);
-
-    // 版本比较：只允许升级到更高版本
-    $local = json_decode(file_get_contents(__DIR__ . '/../version.json'), true);
+    $local = json_decode(@file_get_contents(__DIR__ . '/../version.json'), true);
     $currentVersion = $local['version'] ?? '0.0.0';
     if (!version_compare($remote['version'], $currentVersion, '>')) {
         jsonOutput(['error' => '当前已是最新版本（' . $currentVersion . '），无需升级'], 400);
     }
 
-    $zipUrl = githubProxy($remote['url'] ?? '');
-    if (empty($zipUrl)) jsonOutput(['error' => '远程未配置升级包地址'], 400);
+    // ---- 升级包地址白名单校验：只允许本仓库 Releases 资产 ----
+    $zipUrl = $remote['url'] ?? '';
+    if (!isAllowedUpgradeUrl($zipUrl)) {
+        securityLog('upgrade_url_rejected', ['url' => $zipUrl, 'remote' => $remote['version']]);
+        jsonOutput(['error' => '升级包地址不在允许范围内，已拒绝（升级源可能被篡改）'], 400);
+    }
 
-    // 下载 ZIP
-    $ctx = stream_context_create(['http' => ['timeout' => 120]]);
-    $zipData = @file_get_contents($zipUrl, false, $ctx);
-    if (!$zipData) jsonOutput(['error' => '下载升级包失败'], 500);
+    // ---- 下载升级包（带上限） ----
+    $zipData = downloadUpgradeZip($zipUrl);
+    if ($zipData === null) {
+        jsonOutput(['error' => '下载升级包失败（网络异常或超出体积上限）'], 500);
+    }
+
+    // ---- 完整性校验：version.json 提供 sha256 时必须匹配 ----
+    $expectedSha = strtolower(trim((string)($remote['sha256'] ?? '')));
+    if ($expectedSha !== '') {
+        if (!hash_equals($expectedSha, hash('sha256', $zipData))) {
+            securityLog('upgrade_hash_mismatch', ['expected' => $expectedSha, 'remote' => $remote['version']]);
+            jsonOutput(['error' => '升级包完整性校验失败，已中止升级'], 400);
+        }
+    } else {
+        error_log('[班费系统] 升级包未提供 sha256，跳过完整性校验');
+    }
 
     $tmpZip = sys_get_temp_dir() . '/classfund_upgrade_' . time() . '.zip';
     file_put_contents($tmpZip, $zipData);
@@ -157,9 +234,14 @@ function doUpgrade() {
         unlink($tmpZip);
         jsonOutput(['error' => '升级包损坏，无法打开'], 500);
     }
+    if ($zip->numFiles > 5000) {
+        $zip->close(); unlink($tmpZip);
+        jsonOutput(['error' => '升级包文件数量异常，已中止'], 500);
+    }
 
     // 备份当前文件（排除 uploads、backup_、.reasonix）
     $backupDir = __DIR__ . '/../backup_' . date('Ymd_His');
+    if (is_dir($backupDir)) $backupDir .= '_' . substr(md5(uniqid('', true)), 0, 4);
     if (!mkdir($backupDir, 0755, true)) {
         $zip->close(); unlink($tmpZip);
         jsonOutput(['error' => '无法创建备份目录'], 500);
@@ -169,15 +251,23 @@ function doUpgrade() {
     $exclude = ['uploads', '.reasonix', 'backup_', '.git', 'db_config.json'];
     $backupCount = backupFiles($rootDir, $backupDir, $exclude);
 
-    // 解压覆盖
+    // 解压覆盖（路径穿越 / 绝对路径 / 解压体积三重防护）
     $errors = [];
+    $totalUncompressed = 0;
+    $maxUncompressed = 200 * 1024 * 1024;
     for ($i = 0; $i < $zip->numFiles; $i++) {
         $entry = $zip->statIndex($i);
         $name = $entry['name'];
 
         // 跳过目录和排除的文件
-        if (substr($name, -1) === '/') continue;
-        if (strpos($name, '..') !== false) continue; // 路径穿越防护
+        if ($name === '' || substr($name, -1) === '/') continue;
+        if ($name[0] === '/' || preg_match('#(^|/)\.\.(/|$)#', $name)) continue; // 路径穿越防护
+
+        $totalUncompressed += (int)($entry['size'] ?? 0);
+        if ($totalUncompressed > $maxUncompressed) {
+            $zip->close(); unlink($tmpZip);
+            jsonOutput(['error' => '升级包解压体积异常，已中止'], 500);
+        }
 
         // 跳过排除目录中的文件
         $skip = false;
@@ -201,6 +291,9 @@ function doUpgrade() {
 
     $user = currentUser();
     addLog($user['id'], $user['username'], 'upgrade', 'system', null, [
+        'from' => $currentVersion,
+        'to' => $remote['version'],
+        'sha256_verified' => $expectedSha !== '',
         'backup' => basename($backupDir),
         'backup_files' => $backupCount,
         'errors' => $errors,

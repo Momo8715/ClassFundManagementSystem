@@ -314,21 +314,23 @@ function handleExportReportPdf() {
     $detStmt->execute([':s' => $p['start'], ':e' => $p['end']]);
     $details = $detStmt->fetchAll();
 
-    require_once __DIR__ . '/fpdf.php';
+    // tFPDF + 文泉驿微米黑（Apache-2.0）；字体指标已预生成缓存，运行时无需解析 TTF
+    require_once __DIR__ . '/tfpdf.php';
+    require_once __DIR__ . '/font/unifont/ttfonts.php';
 
     // ---- 自定义 PDF 类（页脚） ----
-    class ClassFundPdf extends FPDF {
+    class ClassFundPdf extends tFPDF {
         protected $footerNote = '';
         public function setFooterNote($n) { $this->footerNote = $n; }
         public function Footer() {
             $this->SetY(-15);
-            $this->SetFont('helvetica', '', 8);
+            $this->SetFont('wqy', '', 8);
             $this->SetTextColor(150);
             $this->Cell(0, 10, $this->footerNote, 0, 0, 'C');
             $this->Cell(0, 10, '第 ' . $this->PageNo() . ' 页', 0, 0, 'R');
         }
         public function sectionTitle($t) {
-            $this->SetFont('helvetica', 'B', 12);
+            $this->SetFont('wqy', '', 12);
             $this->SetTextColor(99, 102, 241);
             $this->Cell(0, 8, $t, 0, 1);
             $this->SetTextColor(0);
@@ -336,55 +338,56 @@ function handleExportReportPdf() {
         }
         public function summaryRow($label, $value, $color = null) {
             if ($color) $this->SetTextColor($color[0], $color[1], $color[2]);
-            $this->SetFont('helvetica', 'B', 11);
+            $this->SetFont('wqy', '', 11);
             $this->Cell(50, 7, $label, 0, 0);
-            $this->SetFont('helvetica', 'B', 11);
+            $this->SetFont('wqy', '', 11);
             $this->Cell(0, 7, $value, 0, 1);
             $this->SetTextColor(0);
         }
     }
 
     $pdf = new ClassFundPdf();
+    $pdf->AddFont('wqy', '', 'wqy-microhei.ttf', true);
     $pdf->SetTitle($p['label'] . ' - 收支汇总报表');
     $pdf->AddPage();
 
     // 标题
-    $pdf->SetFont('helvetica', 'B', 16);
+    $pdf->SetFont('wqy', '', 16);
     $pdf->Cell(0, 10, iconv('UTF-8', 'UTF-8//IGNORE', '班级班费管理系统'), 0, 1, 'C');
-    $pdf->SetFont('helvetica', 'B', 14);
+    $pdf->SetFont('wqy', '', 14);
     $pdf->Cell(0, 9, iconv('UTF-8', 'UTF-8//IGNORE', $p['label'] . ' 收支汇总报表'), 0, 1, 'C');
-    $pdf->SetFont('helvetica', '', 9);
+    $pdf->SetFont('wqy', '', 9);
     $pdf->SetTextColor(120);
     $pdf->Cell(0, 6, '统计期间：' . $p['start'] . ' ~ ' . $p['end'] . '    生成时间：' . date('Y-m-d H:i'), 0, 1, 'C');
     $pdf->SetTextColor(0);
     $pdf->Ln(4);
 
     // 汇总卡片（表格形式）
-    $pdf->sectionTitle('📊 收支汇总');
-    $pdf->SetFont('helvetica', '', 10);
+    $pdf->sectionTitle('收支汇总');
+    $pdf->SetFont('wqy', '', 10);
     $pdf->SetFillColor(245, 246, 255);
     $pdf->Cell(63, 8, '期初余额：¥' . number_format($s['begin_balance'], 2), 1, 0, 'C', true);
     $pdf->Cell(63, 8, '总收入：¥' . number_format($s['total_income'], 2), 1, 0, 'C', true);
     $pdf->Cell(63, 8, '总支出：¥' . number_format($s['total_expense'], 2), 1, 1, 'C', true);
-    $pdf->SetFont('helvetica', 'B', 11);
+    $pdf->SetFont('wqy', '', 11);
     $balColor = $s['balance'] >= 0 ? [16, 185, 129] : [244, 63, 94];
     $pdf->SetTextColor($balColor[0], $balColor[1], $balColor[2]);
     $pdf->Cell(63, 9, '结余：¥' . number_format($s['balance'], 2), 1, 0, 'C', true);
     $pdf->SetTextColor(0);
-    $pdf->SetFont('helvetica', '', 10);
+    $pdf->SetFont('wqy', '', 10);
     $pdf->Cell(63, 9, '收支笔数：' . $s['income_count'] . ' 收 / ' . $s['expense_count'] . ' 支', 1, 0, 'C', true);
     $pdf->Cell(63, 9, '收缴率：' . $s['collect_rate'] . '%', 1, 1, 'C', true);
     $pdf->Ln(4);
 
     // 分类汇总
-    $pdf->sectionTitle('📁 分类汇总');
-    $pdf->SetFont('helvetica', 'B', 9);
+    $pdf->sectionTitle('分类汇总');
+    $pdf->SetFont('wqy', '', 9);
     $pdf->SetFillColor(230, 232, 255);
     $pdf->Cell(80, 7, '分类', 1, 0, 'C', true);
     $pdf->Cell(25, 7, '类型', 1, 0, 'C', true);
     $pdf->Cell(40, 7, '笔数', 1, 0, 'C', true);
     $pdf->Cell(45, 7, '金额', 1, 1, 'C', true);
-    $pdf->SetFont('helvetica', '', 9);
+    $pdf->SetFont('wqy', '', 9);
     foreach ($d['by_category'] as $i => $c) {
         $pdf->Cell(80, 6, iconv('UTF-8', 'UTF-8//IGNORE', $c['category']), 1);
         $pdf->Cell(25, 6, $c['type'] === 'income' ? '收入' : '支出', 1, 0, 'C');
@@ -395,14 +398,14 @@ function handleExportReportPdf() {
 
     // 月度趋势
     if (!empty($d['by_month'])) {
-        $pdf->sectionTitle('📅 月度趋势');
-        $pdf->SetFont('helvetica', 'B', 9);
+        $pdf->sectionTitle('月度趋势');
+        $pdf->SetFont('wqy', '', 9);
         $pdf->SetFillColor(230, 232, 255);
         $pdf->Cell(50, 7, '月份', 1, 0, 'C', true);
         $pdf->Cell(50, 7, '收入', 1, 0, 'C', true);
         $pdf->Cell(50, 7, '支出', 1, 0, 'C', true);
         $pdf->Cell(40, 7, '净额', 1, 1, 'C', true);
-        $pdf->SetFont('helvetica', '', 9);
+        $pdf->SetFont('wqy', '', 9);
         foreach ($d['by_month'] as $m) {
             $net = $m['net'];
             $pdf->Cell(50, 6, $m['month'], 1, 0, 'C');
@@ -414,12 +417,12 @@ function handleExportReportPdf() {
     }
 
     // 收支明细
-    $pdf->sectionTitle('📋 收支明细（' . count($details) . ' 笔）');
+    $pdf->sectionTitle('收支明细（' . count($details) . ' 笔）');
     if (empty($details)) {
-        $pdf->SetFont('helvetica', '', 10);
+        $pdf->SetFont('wqy', '', 10);
         $pdf->Cell(0, 8, '该期间暂无收支记录', 0, 1, 'C');
     } else {
-        $pdf->SetFont('helvetica', 'B', 8);
+        $pdf->SetFont('wqy', '', 8);
         $pdf->SetFillColor(230, 232, 255);
         $pdf->Cell(22, 6, '日期', 1, 0, 'C', true);
         $pdf->Cell(15, 6, '类型', 1, 0, 'C', true);
@@ -427,7 +430,7 @@ function handleExportReportPdf() {
         $pdf->Cell(75, 6, '描述', 1, 0, 'C', true);
         $pdf->Cell(30, 6, '分类', 1, 0, 'C', true);
         $pdf->Cell(18, 6, '记录人', 1, 1, 'C', true);
-        $pdf->SetFont('helvetica', '', 8);
+        $pdf->SetFont('wqy', '', 8);
         foreach ($details as $i => $t) {
             // 换页保护
             if ($pdf->GetY() > 265) $pdf->AddPage();
@@ -441,6 +444,7 @@ function handleExportReportPdf() {
     }
 
     $pdf->setFooterNote('班级班费管理系统 - ' . $p['label']);
-    $pdf->Output('D', '收支报表_' . $p['label'] . '_' . date('Ymd') . '.pdf');
+    // 第三个参数 true：告知 tFPDF 文件名本身是 UTF-8，避免中文文件名被二次编码
+    $pdf->Output('D', '收支报表_' . $p['label'] . '_' . date('Ymd') . '.pdf', true);
     exit;
 }

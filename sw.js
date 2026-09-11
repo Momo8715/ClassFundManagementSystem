@@ -1,10 +1,11 @@
 // 班级班费管理系统 - Service Worker（PWA 离线缓存）
 // 只缓存静态资源，绝不缓存动态 API / HTML 登录页（防止数据陈旧）
-const CACHE_NAME = 'classfund-static-v1';
+// 注意：不要预缓存 './'——登录态下的首页 HTML 含用户名与 CSRF token，不应写入 Cache Storage
+const CACHE_NAME = 'classfund-static-v5';
 const STATIC_ASSETS = [
-  './',
-  './assets/css/style.css?v=13',
-  './assets/js/app.js?v=23',
+  './assets/css/style.css?v=17',
+  './assets/js/app.js?v=32',
+  './assets/js/security.js?v=2',
   './manifest.json'
 ];
 
@@ -33,7 +34,7 @@ self.addEventListener('fetch', (e) => {
   const path = url.pathname;
 
   // 静态资源（css/js/图片/字体）缓存优先，后台更新
-  if (/\/assets\//.test(path) || path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.webp') || path.endsWith('.ico')) {
+  if (/\/assets\//.test(path) || /\.(png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf)$/i.test(path)) {
     e.respondWith(
       caches.match(e.request).then((cached) => {
         const network = fetch(e.request).then((resp) => {

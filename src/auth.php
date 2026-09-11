@@ -67,6 +67,8 @@ function handleLogin() {
 
 // ==================== 访客登录 ====================
 function handleGuestLogin() {
+    // 访客登录无需凭据，但仍需限流：每次都会写入登录历史与操作日志，防止被刷爆
+    requireRateLimit('guest_login', 30, 60);
     $input = jsonInput();
     startSession();
     // 防止会话固定攻击：访客登录同样重新生成 session ID

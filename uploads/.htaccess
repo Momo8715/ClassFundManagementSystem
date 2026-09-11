@@ -1,0 +1,10 @@
+# 禁止 PHP 执行，防止恶意脚本上传后被运行（兼容 mod_php 与 php-fpm）
+<FilesMatch "\.(php|phtml|php3|php4|php5|php7|php8|phps|phar)$">
+  Require all denied
+</FilesMatch>
+<IfModule !mod_authz_core.c>
+  <FilesMatch "\.(php|phtml|php3|php4|php5|php7|php8|phps|phar)$">
+    Order allow,deny
+    Deny from all
+  </FilesMatch>
+</IfModule>

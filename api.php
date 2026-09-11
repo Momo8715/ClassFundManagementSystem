@@ -24,6 +24,9 @@ if (!isDbInstalled()) {
 // 自动迁移数据库
 autoMigrate();
 
+// IP 黑名单拦截（命中则直接 403，覆盖所有 API 操作）
+requireNotBlockedIp();
+
 // 加载所有模块
 require_once __DIR__ . '/src/auth.php';
 require_once __DIR__ . '/src/transactions.php';
@@ -57,6 +60,8 @@ $actionMethods = [
     'upload_xlsx' => ['POST'],
     'roster_xlsx' => ['POST'],
     'ban_user' => ['POST'],
+    'blocked_ip' => ['GET', 'POST', 'DELETE'],
+    'export_security_csv' => ['GET'],
     'do_upgrade' => ['POST'],
 ];
 if (isset($actionMethods[$action]) && !in_array($method, $actionMethods[$action], true)) {
@@ -175,6 +180,12 @@ switch ($action) {
         break;
     case 'ban_user':
         handleBanUser();
+        break;
+    case 'blocked_ip':
+        handleBlockedIp($method);
+        break;
+    case 'export_security_csv':
+        handleExportSecurityCsv();
         break;
 
     // ========== 远程升级 ==========

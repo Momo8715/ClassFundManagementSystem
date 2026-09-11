@@ -11,21 +11,6 @@ function escapeHtml(string $value): string {
     return htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
-/** 递归编码数组中的所有字符串值 */
-function escapeHtmlArray(array $data): array {
-    $result = [];
-    foreach ($data as $key => $value) {
-        if (is_string($value)) {
-            $result[$key] = escapeHtml($value);
-        } elseif (is_array($value)) {
-            $result[$key] = escapeHtmlArray($value);
-        } else {
-            $result[$key] = $value;
-        }
-    }
-    return $result;
-}
-
 // ========== CSRF 保护 ==========
 
 /** 生成 CSRF 令牌并存入 session */
@@ -194,7 +179,7 @@ function safeExtension(string $mime): string {
 
 // ========== 安全日志 ==========
 
-/** 记录安全事件到 error_log（不依赖数据库） */
+/** 记录安全事件：写入 error_log，并尽力同步到 security_events 表（供安全面板展示） */
 function securityLog(string $event, array $context = []): void {
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
     $log = sprintf(
@@ -205,5 +190,44 @@ function securityLog(string $event, array $context = []): void {
         json_encode($context, JSON_UNESCAPED_UNICODE)
     );
     error_log($log);
+
+    // 落库（最佳努力）：每请求最多 5 条，同事件+同 IP 60 秒内去重，避免被刷爆
+    static $writes = 0;
+    if ($writes >= 5) return;
+    $writes++;
+    try {
+        [$ipv4, $ipv6] = function_exists('getClientIPs') ? getClientIPs() : [null, null];
+        $detail = json_encode($context, JSON_UNESCAPED_UNICODE);
+        $detail = mb_substr(is_string($detail) ? $detail : '', 0, 500);
+        $dup = db()->prepare("SELECT 1 FROM security_events WHERE event=:e AND ipv4 <=> :ip AND created_at > (NOW() - INTERVAL 60 SECOND) LIMIT 1");
+        $dup->execute([':e' => $event, ':ip' => $ipv4]);
+        if ($dup->fetchColumn()) return;
+        db()->prepare("INSERT INTO security_events (event, detail, ipv4, ipv6, username, created_at)
+            VALUES (:e, :d, :i4, :i6, :u, NOW())")->execute([
+            ':e'  => mb_substr($event, 0, 100),
+            ':d'  => $detail,
+            ':i4' => $ipv4,
+            ':i6' => $ipv6,
+            ':u'  => isset($_SESSION['username']) ? mb_substr((string)$_SESSION['username'], 0, 50) : null,
+        ]);
+    } catch (\Exception $e) {
+        // 落库失败不影响主流程
+    }
+}
+
+// ========== 导出辅助 ==========
+
+/** CSV 公式注入防护：以 = + - @ 或制表符/回车开头的单元格前置单引号，防止 Excel 执行公式 */
+function csvSafe($value): string {
+    $v = (string)$value;
+    if ($v !== '' && preg_match('/^[=+\-@\t\r]/', $v)) return "'" . $v;
+    return $v;
+}
+
+/** 生成兼容中文文件名的 Content-Disposition（RFC 6266 / RFC 5987） */
+function contentDisposition(string $filename): string {
+    $ascii = preg_replace('/[^\x20-\x7E]/', '_', $filename);
+    $ascii = str_replace(['"', '\\'], '', (string)$ascii);
+    return 'attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($filename);
 }
 

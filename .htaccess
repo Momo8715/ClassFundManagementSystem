@@ -1,0 +1,51 @@
+# 班级班费管理系统 - Apache 配置（放在网站根目录）
+# 注意：nginx / 宝塔默认的 nginx 环境不会读取 .htaccess，
+#       请在站点配置中另行封禁敏感文件（db_config.json、schema.sql、backup_* 目录）。
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 禁止 HTTP 访问升级备份目录（备份内含完整源码与 install.php）
+  RewriteRule ^backup_ - [F,L]
+
+  # 如果请求的文件或目录存在，直接访问
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+
+  # 否则重写到 index.php（保留查询参数）
+  RewriteRule ^(.*)$ index.php [QSA,L]
+</IfModule>
+
+# 禁止直接访问敏感文件（数据库配置 / 建表脚本 / 配置）
+<FilesMatch "^(db_config\.json|config\.php|schema\.sql)$">
+  Require all denied
+</FilesMatch>
+
+# 兼容 Apache 2.2（无 mod_authz_core）
+<IfModule !mod_authz_core.c>
+  <FilesMatch "^(db_config\.json|config\.php|schema\.sql)$">
+    Order allow,deny
+    Deny from all
+  </FilesMatch>
+</IfModule>
+
+# 静态资源长缓存（与 nginx / Cloudflare 配置对齐）
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType text/css "access plus 1 year"
+  ExpiresByType application/javascript "access plus 1 year"
+  ExpiresByType image/png "access plus 1 year"
+  ExpiresByType image/jpeg "access plus 1 year"
+  ExpiresByType image/gif "access plus 1 year"
+  ExpiresByType image/svg+xml "access plus 1 year"
+  ExpiresByType image/x-icon "access plus 1 year"
+  ExpiresByType image/webp "access plus 1 year"
+  ExpiresByType font/woff2 "access plus 1 year"
+</IfModule>
+
+# 字符集
+AddDefaultCharset UTF-8
+
+# 错误页面
+ErrorDocument 404 /index.php
