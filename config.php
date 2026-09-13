@@ -467,6 +467,18 @@ function payMethods(): array {
 }
 
 /**
+ * 在线缴费中「未并入班费收缴轮次」的金额（按学生汇总）。
+ * 已并入轮次的支付通过 fee_payments.tx_id 指向班费收缴账目识别，避免与本轮 payer 重复计入。
+ */
+function payOnlineUnattributedSql(): string {
+    return "SELECT fp.student_id, COALESCE(SUM(fp.amount),0) v
+            FROM fee_payments fp
+            LEFT JOIN transactions t ON t.id = fp.tx_id AND t.sub_category='班费收缴' AND t.deleted_at IS NULL
+            WHERE t.id IS NULL
+            GROUP BY fp.student_id";
+}
+
+/**
  * 支付通道类型（驱动）
  *   epay   = 彩虹易支付协议（mapi.php + MD5/RSA 签名），需要 网关 / 商户ID / 密钥
  *   vmqfox = V免签Fox协议（/api/order/create + HMAC-SHA256），只需要 网关 / 通讯密钥

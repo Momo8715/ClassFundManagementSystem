@@ -308,12 +308,12 @@ function handlePayments() {
         ];
     }
 
-    // 在线支付核销金额：按学生归属计入已缴（子分类「线上缴费」的账目不计入轮次，避免污染轮次）
+    // 在线支付核销金额：按学生归属计入已缴；已并入轮次的支付已通过本轮 payer 计入，这里只统计未并入的部分
     $onlinePaid = [];
-    foreach (db()->query("SELECT student_id, COALESCE(SUM(amount),0) paid FROM fee_payments GROUP BY student_id")->fetchAll() as $fp) {
+    foreach (db()->query(payOnlineUnattributedSql())->fetchAll() as $fp) {
         $sid = (int)$fp['student_id'];
         if ($sid <= 0) continue;
-        $onlinePaid[$sid] = round((float)$fp['paid'], 2);
+        $onlinePaid[$sid] = round((float)$fp['v'], 2);
         if (isset($ps[$sid])) $ps[$sid]['paid'] += $onlinePaid[$sid];
     }
 
@@ -392,10 +392,10 @@ function handleExportUnpaid() {
         }
     }
 
-    // 在线支付核销金额计入已缴
-    foreach (db()->query("SELECT student_id, COALESCE(SUM(amount),0) paid FROM fee_payments GROUP BY student_id")->fetchAll() as $fp) {
+    // 在线支付核销金额计入已缴（仅未并入轮次的部分）
+    foreach (db()->query(payOnlineUnattributedSql())->fetchAll() as $fp) {
         $sid = (int)$fp['student_id'];
-        if ($sid > 0 && isset($ps[$sid])) $ps[$sid]['paid'] += (float)$fp['paid'];
+        if ($sid > 0 && isset($ps[$sid])) $ps[$sid]['paid'] += (float)$fp['v'];
     }
 
     // 与缴费页 handlePayments 口径一致：累计应缴 = 各轮 per_person 相加（不做除法）

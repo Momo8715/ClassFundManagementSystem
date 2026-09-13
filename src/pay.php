@@ -66,7 +66,7 @@ function payAllFeeStatus(): array {
         ];
     }
     $online = [];
-    foreach (db()->query("SELECT student_id, COALESCE(SUM(amount),0) v FROM fee_payments GROUP BY student_id")->fetchAll() as $r) {
+    foreach (db()->query(payOnlineUnattributedSql())->fetchAll() as $r) {
         $online[(int)$r['student_id']] = (float)$r['v'];
     }
     $out = [];
@@ -195,6 +195,49 @@ function payCreateOrder(array $order, array $channel): array {
 }
 
 // ==================== 核销 ====================
+/**
+ * 把一笔在线支付并入「班费收缴」轮次账目。
+ *   指定轮次：直接并入该轮；通用缴费（round_id=0）：按各轮待缴从旧到新依次并入。
+ * 返回 ['merged' => [轮次ID => 并入金额], 'rest' => 未能并入的余额]。
+ */
+function payAttributeToRounds(int $studentId, int $roundId, float $amount): array {
+    $merged = [];
+    $left = round($amount, 2);
+    if ($studentId <= 0 || $left <= 0) return ['merged' => $merged, 'rest' => $left];
+
+    $eligible = (int)db()->query("SELECT COUNT(*) FROM class_roster WHERE exempt=0")->fetchColumn();
+    $sql = "SELECT id, amount, expected_amount, per_person, payer_ids, exempt_ids FROM transactions
+            WHERE type='income' AND sub_category='班费收缴' AND deleted_at IS NULL";
+    if ($roundId > 0) {
+        $st = db()->prepare($sql . " AND id=:id");
+        $st->execute([':id' => $roundId]);
+        $rounds = $st->fetchAll();
+    } else {
+        $rounds = db()->query($sql . " ORDER BY date ASC, id ASC")->fetchAll();
+    }
+
+    foreach ($rounds as $r) {
+        if ($left <= 0) break;
+        if ((string)($r['payer_ids'] ?? '') === 'all') continue;   // 全班轮次：该生已计入
+        $pids = array_map('intval', json_decode($r['payer_ids'] ?? '', true) ?: []);
+        if (in_array($studentId, $pids, true)) continue;           // 该生已在本轮缴费名单
+        $exids = array_map('intval', json_decode($r['exempt_ids'] ?? '', true) ?: []);
+        if (in_array($studentId, $exids, true)) continue;          // 本轮免缴
+        $pp = payRoundPerPerson($r, $eligible);
+        if ($pp <= 0 || $left + 0.001 < $pp) break;                // 余额不足以完整缴清本轮
+        $pids[] = $studentId;
+        db()->prepare("UPDATE transactions SET payer_ids=:p, amount=:a WHERE id=:id")->execute([
+            ':p'  => json_encode(array_values(array_unique($pids))),
+            ':a'  => round((float)$r['amount'] + $pp, 2),
+            ':id' => (int)$r['id'],
+        ]);
+        $merged[(int)$r['id']] = round(($merged[(int)$r['id']] ?? 0) + $pp, 2);
+        $left = round($left - $pp, 2);
+    }
+    return ['merged' => $merged, 'rest' => round($left, 2)];
+}
+
+/** 核销：写入 fee_payments，并把款项并入对应的班费收缴轮次（不再单独生成「线上缴费」账目） */
 function paySettle(array $order, string $tradeNo): bool {
     try {
         db()->beginTransaction();
@@ -207,16 +250,25 @@ function paySettle(array $order, string $tradeNo): bool {
         ]);
         if ($ins->rowCount() === 0) { db()->commit(); return true; }
 
-        $desc = '线上缴费' . (!empty($order['student_name']) ? '-' . $order['student_name'] : '') . '（订单 ' . $order['order_no'] . '）';
-        $tx = db()->prepare("INSERT INTO transactions (type, sub_category, amount, date, description, category, recorded_by)
-            VALUES ('income', '线上缴费', :a, CURDATE(), :d, '班费', :rb)");
-        $tx->execute([':a' => $order['amount'], ':d' => mb_substr($desc, 0, 500), ':rb' => (int)($order['created_by'] ?? 0)]);
-        $txId = (int)db()->lastInsertId();
+        $amount = round((float)$order['amount'], 2);
+        $attr = payAttributeToRounds((int)$order['student_id'], (int)$order['round_id'], $amount);
+        $rest = round((float)$attr['rest'], 2);
+        $txId = 0;
+        if (!empty($attr['merged'])) $txId = (int)array_key_first($attr['merged']);
+        if ($rest > 0) {
+            // 无法并入轮次的余额（例如通用缴费时该生已缴清）：仍单独入账，避免总账丢失
+            $desc = '线上缴费' . (!empty($order['student_name']) ? '-' . $order['student_name'] : '') . '（订单 ' . $order['order_no'] . '）';
+            $tx = db()->prepare("INSERT INTO transactions (type, sub_category, amount, date, description, category, recorded_by)
+                VALUES ('income', '线上缴费', :a, CURDATE(), :d, '班费', :rb)");
+            $tx->execute([':a' => $rest, ':d' => mb_substr($desc, 0, 500), ':rb' => (int)($order['created_by'] ?? 0)]);
+            $txId = (int)db()->lastInsertId();
+        }
         db()->prepare("UPDATE fee_payments SET tx_id=:tid WHERE order_no=:o")->execute([':tid' => $txId, ':o' => $order['order_no']]);
         db()->prepare("UPDATE payment_orders SET settled=1 WHERE id=:id")->execute([':id' => (int)$order['id']]);
         db()->commit();
         addLog(0, 'system', 'pay_settle', 'payment', (int)$order['id'], [
-            'order_no' => $order['order_no'], 'amount' => $order['amount'], 'student_id' => $order['student_id'], 'tx_id' => $txId,
+            'order_no' => $order['order_no'], 'amount' => $amount, 'student_id' => $order['student_id'],
+            'merged_rounds' => array_keys($attr['merged']), 'unattributed' => $rest,
         ]);
         return true;
     } catch (\Exception $e) {
@@ -379,8 +431,8 @@ function handlePayMeta() {
     foreach ($rounds as &$rd) { $rd['per_person'] = payRoundPerPerson($rd, $eligibleNow); }
     unset($rd);
     $paidMap = [];
-    foreach (db()->query("SELECT student_id, COALESCE(SUM(amount),0) paid FROM fee_payments GROUP BY student_id")->fetchAll() as $r) {
-        $paidMap[(int)$r['student_id']] = round((float)$r['paid'], 2);
+    foreach (db()->query(payOnlineUnattributedSql())->fetchAll() as $r) {
+        $paidMap[(int)$r['student_id']] = round((float)$r['v'], 2);
     }
     $usable = array_values(array_filter(payChannels(), function ($c) { return $c['enabled'] && $c['gateway'] !== '' && $c['pid'] !== '' && $c['key'] !== ''; }));
     jsonOutput([
