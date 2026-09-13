@@ -248,6 +248,20 @@
       : '<span style="font-size:12px;color:var(--text-secondary)">请先添加支付方式</span>';
   }
 
+  // V免签不需要商户ID；网关填 vmqfox 服务地址、密钥填通讯密钥
+  function syncDriverUi(wrap) {
+    var drv = wrap.querySelector('.ch-driver');
+    var pid = wrap.querySelector('.ch-pid');
+    var key = wrap.querySelector('.ch-key');
+    var vm = drv.value === 'vmqfox';
+    pid.disabled = vm;
+    pid.placeholder = vm ? 'V免签不需要' : '1000';
+    key.placeholder = vm ? '通讯密钥（32位）' : (key.getAttribute('data-hint') || '请输入商户密钥');
+    var gw = wrap.querySelector('.ch-gateway');
+    if (vm) gw.setAttribute('data-ph', gw.placeholder);
+    gw.placeholder = vm ? 'https://vmqfox.example.com' : (gw.getAttribute('data-ph') || 'https://pay.example.com');
+  }
+
   function channelRow(ch) {
     ch = ch || {};
     var types = ch.types || [];
@@ -262,6 +276,10 @@
       '</div>' +
       '<div style="display:grid;grid-template-columns:90px 1fr;gap:6px 10px;align-items:center">' +
         '<label style="font-size:12px">名称</label><input type="text" class="ch-name" placeholder="如：主通道" style="' + inpStyle + ';width:100%">' +
+        '<label style="font-size:12px">类型</label><select class="ch-driver" style="' + inpStyle + ';width:100%">' +
+          '<option value="epay">易支付</option>' +
+          '<option value="vmqfox">V免签</option>' +
+        '</select>' +
         '<label style="font-size:12px">网关</label><input type="text" class="ch-gateway" placeholder="https://pay.example.com" style="' + inpStyle + ';width:100%">' +
         '<label style="font-size:12px">商户ID</label><input type="text" class="ch-pid" placeholder="1000" style="' + inpStyle + ';width:100%">' +
         '<label style="font-size:12px">密钥</label><input type="password" class="ch-key" placeholder="留空表示不修改" autocomplete="new-password" style="' + inpStyle + ';width:100%">' +
@@ -272,7 +290,12 @@
     wrap.querySelector('.ch-gateway').value = ch.gateway || '';
     wrap.querySelector('.ch-pid').value = ch.pid || '';
     wrap.querySelector('.ch-key').placeholder = ch.key_set ? ('已设置（' + (ch.key_hint || '') + '），留空不修改') : '请输入商户密钥';
+    wrap.querySelector('.ch-key').setAttribute('data-hint', wrap.querySelector('.ch-key').placeholder);
     wrap.querySelector('.ch-enabled').checked = !!ch.enabled;
+    var drv = wrap.querySelector('.ch-driver');
+    drv.value = ch.driver === 'vmqfox' ? 'vmqfox' : 'epay';
+    syncDriverUi(wrap);
+    drv.addEventListener('change', function () { syncDriverUi(wrap); });
     renderChannelTypes(wrap, types);
     return wrap;
   }
@@ -329,6 +352,7 @@
         channels.push({
           id: r.getAttribute('data-chid') || '',
           name: r.querySelector('.ch-name').value,
+          driver: r.querySelector('.ch-driver').value,
           gateway: r.querySelector('.ch-gateway').value,
           pid: r.querySelector('.ch-pid').value,
           key: r.querySelector('.ch-key').value,

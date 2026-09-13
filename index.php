@@ -772,7 +772,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
     <script src="assets/js/security.js?v=4" defer data-cfasync="false"></script>
     <!-- 在线支付面板（v1.8.1） -->
-    <script src="assets/js/pay.js?v=7" defer data-cfasync="false"></script>
+    <script src="assets/js/pay.js?v=9" defer data-cfasync="false"></script>
     <!-- 通用二级分类页签（多分栏页面） -->
     <script src="assets/js/tabs.js?v=1" defer data-cfasync="false"></script>
     <!-- 收支弹窗「班费收缴」简化模式 -->

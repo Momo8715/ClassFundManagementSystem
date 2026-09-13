@@ -93,6 +93,18 @@ function payStudentStatus(int $studentId): array {
 /** 用指定通道调用易支付 mapi.php；失败回退 submit.php 跳转地址 */
 function epayCreate(array $order, array $channel): array {
     $cfg = getPayConfig();
+    // 易支付的 mapi.php 强制要求 clientip（否则报"用户IP地址(clientip)不能为空"）
+    $clientIp = '';
+    if (function_exists('getClientIPs')) {
+        $ips = getClientIPs();
+        if (!empty($ips[0]) && filter_var($ips[0], FILTER_VALIDATE_IP)) {
+            $clientIp = (string)$ips[0];
+        }
+    }
+    if ($clientIp === '') {
+        $remote = $_SERVER['REMOTE_ADDR'] ?? '';
+        $clientIp = filter_var($remote, FILTER_VALIDATE_IP) ? (string)$remote : '127.0.0.1';
+    }
     $params = [
         'pid'          => $channel['pid'],
         'type'         => $order['channel'],       // 支付方式 alipay/wxpay/qqpay
@@ -102,6 +114,7 @@ function epayCreate(array $order, array $channel): array {
         'name'         => $order['name'],
         'money'        => number_format((float)$order['amount'], 2, '.', ''),
         'sitename'     => $cfg['sitename'],
+        'clientip'     => $clientIp,
     ];
     $params['sign'] = epaySign($params, $channel['key']);
     $params['sign_type'] = $cfg['sign_type'];
@@ -124,6 +137,61 @@ function epayCreate(array $order, array $channel): array {
     $msg = is_array($json) ? ($json['msg'] ?? '') : mb_substr((string)$resp, 0, 200);
     $submit = rtrim($channel['gateway'], '/') . '/submit.php?' . http_build_query($params);
     return ['ok' => true, 'payurl' => $submit, 'qrcode' => '', 'trade_no' => '', 'mapi_error' => $msg];
+}
+
+// ==================== 下单：V免签（V免签Fox 协议） ====================
+/** 建单签名：payId&param&type&price&notifyUrl&returnUrl */
+function vmqfoxSignCreate(string $payId, string $param, string $type, string $price, string $notifyUrl, string $returnUrl, string $key): string {
+    return hash_hmac('sha256', 'payId=' . $payId . '&param=' . $param . '&type=' . $type . '&price=' . $price
+        . '&notifyUrl=' . $notifyUrl . '&returnUrl=' . $returnUrl, $key);
+}
+/** 回调/回跳签名：payId&param&type&price&reallyPrice */
+function vmqfoxSignCallback(string $payId, string $param, string $type, string $price, string $reallyPrice, string $key): string {
+    return hash_hmac('sha256', 'payId=' . $payId . '&param=' . $param . '&type=' . $type . '&price=' . $price
+        . '&reallyPrice=' . $reallyPrice, $key);
+}
+/**
+ * V免签下单：POST {gateway}/api/order/create
+ * type: 1=微信 2=支付宝；返回 data.payUrl（支付宝二维码链接）与 data.redirectUrl（收银台）
+ */
+function vmqfoxCreate(array $order, array $channel): array {
+    $payType = $order['channel'] === 'alipay' ? '2' : ($order['channel'] === 'wxpay' ? '1' : '');
+    if ($payType === '') return ['ok' => false, 'error' => 'V免签仅支持支付宝 / 微信'];
+    $payId  = (string)$order['order_no'];
+    $param  = '';
+    $price  = number_format((float)$order['amount'], 2, '.', '');
+    $notify = payNotifyUrl();
+    $ret    = payReturnUrl();
+    $sign   = vmqfoxSignCreate($payId, $param, $payType, $price, $notify, $ret, (string)$channel['key']);
+    $url = rtrim($channel['gateway'], '/') . '/api/order/create';
+    $ctx = stream_context_create(['http' => [
+        'method'  => 'POST',
+        'header'  => "Content-Type: application/x-www-form-urlencoded
+User-Agent: ClassFund/1.0
+",
+        'content' => http_build_query(['payId' => $payId, 'param' => $param, 'type' => $payType, 'price' => $price,
+            'notifyUrl' => $notify, 'returnUrl' => $ret, 'sign' => $sign]),
+        'timeout' => 15, 'ignore_errors' => true,
+    ]]);
+    $resp = @file_get_contents($url, false, $ctx);
+    $json = $resp ? json_decode($resp, true) : null;
+    if (!is_array($json) || (int)($json['code'] ?? 0) !== 200) {
+        $msg = is_array($json) ? ($json['msg'] ?? '') : mb_substr((string)$resp, 0, 200);
+        return ['ok' => false, 'error' => $msg !== '' ? $msg : 'V免签下单失败'];
+    }
+    $d = is_array($json['data'] ?? null) ? $json['data'] : [];
+    $qr = (string)($d['payUrl'] ?? '');
+    return [
+        'ok'      => true,
+        'payurl'  => (string)($d['redirectUrl'] ?? '') !== '' ? (string)$d['redirectUrl'] : $qr,
+        'qrcode'  => $qr,
+        'trade_no' => (string)($d['orderId'] ?? ''),
+    ];
+}
+
+/** 按通道类型下单：epay=易支付，vmqfox=V免签 */
+function payCreateOrder(array $order, array $channel): array {
+    return payChannelDriver($channel) === 'vmqfox' ? vmqfoxCreate($order, $channel) : epayCreate($order, $channel);
 }
 
 // ==================== 核销 ====================
@@ -166,7 +234,8 @@ function payConfigPublic(): array {
     foreach (payChannels() as $ch) {
         $key = (string)$ch['key'];
         $channels[] = [
-            'id' => $ch['id'], 'name' => $ch['name'], 'gateway' => $ch['gateway'], 'pid' => $ch['pid'],
+            'id' => $ch['id'], 'name' => $ch['name'], 'driver' => $ch['driver'] ?? 'epay',
+            'gateway' => $ch['gateway'], 'pid' => $ch['pid'],
             'types' => $ch['types'], 'enabled' => $ch['enabled'],
             'key_set' => $key !== '',
             'key_hint' => $key !== '' ? ('****' . (strlen($key) > 4 ? substr($key, -4) : '')) : '',
@@ -247,17 +316,21 @@ function handlePayConfigSave() {
         $keyIn = (string)($ch['key'] ?? '');
         $types = array_values(array_intersect(array_map('strval', (array)($ch['types'] ?? [])), $methodCodes));
         $en   = !empty($ch['enabled']) && $ch['enabled'] !== '0' && $ch['enabled'] !== 'false';
+        $driver = strtolower(trim((string)($ch['driver'] ?? 'epay')));
+        if (!in_array($driver, ['epay', 'vmqfox'], true)) $driver = 'epay';
 
         if ($gw !== '' && !preg_match('#^https?://[^\s/]+#i', $gw)) jsonOutput(['error' => '通道「' . $name . '」网关地址格式不正确'], 400);
         if ($pid !== '' && !preg_match('/^[A-Za-z0-9_\-]{1,64}$/', $pid)) jsonOutput(['error' => '通道「' . $name . '」商户ID格式不正确'], 400);
         if ($keyIn !== '' && !preg_match('/^[^\s\'"\r\n]{1,128}$/', $keyIn)) jsonOutput(['error' => '通道「' . $name . '」密钥含非法字符'], 400);
         $key = $keyIn !== '' ? $keyIn : (string)($existing[$id]['key'] ?? '');
         if (empty($types)) $types = $methodCodes;
-        if ($en && ($gw === '' || $pid === '' || $key === '')) jsonOutput(['error' => '通道「' . $name . '」启用前需填完整：网关 / 商户ID / 密钥'], 400);
+        if ($en && ($gw === '' || $key === '' || ($driver === 'epay' && $pid === ''))) {
+            jsonOutput(['error' => '通道「' . $name . '」启用前需填完整：' . ($driver === 'vmqfox' ? '网关 / 通讯密钥' : '网关 / 商户ID / 密钥')], 400);
+        }
 
-        $channels[] = ['id' => $id, 'name' => $name, 'gateway' => $gw, 'pid' => $pid, 'key' => $key, 'types' => $types, 'enabled' => $en];
+        $channels[] = ['id' => $id, 'name' => $name, 'driver' => $driver, 'gateway' => $gw, 'pid' => $pid, 'key' => $key, 'types' => $types, 'enabled' => $en];
     }
-    $usable = array_filter($channels, function ($c) { return $c['enabled'] && $c['gateway'] !== '' && $c['pid'] !== '' && $c['key'] !== ''; });
+    $usable = array_filter($channels, function ($c) { return function_exists('payChannelReady') ? payChannelReady($c) : ($c['enabled'] && $c['gateway'] !== '' && $c['key'] !== ''); });
     if ($enabled && count($usable) === 0) jsonOutput(['error' => '开启在线支付前，至少需要一个「配置完整且已启用」的通道'], 400);
 
     // 默认支付方式若不在可用集合内，自动回退到第一个可用类型
@@ -379,7 +452,7 @@ function handlePayCreate() {
         ]);
 
     $name = '班费缴费' . ($studentName !== '' ? '-' . $studentName : '');
-    $res = epayCreate(['order_no' => $orderNo, 'channel' => $type, 'amount' => $amount, 'name' => $name], $channel);
+    $res = payCreateOrder(['order_no' => $orderNo, 'channel' => $type, 'amount' => $amount, 'name' => $name], $channel);
     if (!$res['ok']) {
         db()->prepare("UPDATE payment_orders SET status='closed' WHERE order_no=:o")->execute([':o' => $orderNo]);
         jsonOutput(['error' => '下单失败：' . ($res['error'] ?? '未知错误')], 502);
@@ -399,7 +472,8 @@ function handlePayNotify() {
 
     $params = array_merge($_GET, $_POST);
     unset($params['action']);
-    $outNo = (string)($params['out_trade_no'] ?? '');
+    // 易支付回调用 out_trade_no；V免签回调用 payId
+    $outNo = (string)($params['out_trade_no'] ?? $params['payId'] ?? '');
     if ($outNo === '') { echo 'fail'; exit; }
 
     $stmt = db()->prepare("SELECT * FROM payment_orders WHERE order_no=:o LIMIT 1");
@@ -411,14 +485,36 @@ function handlePayNotify() {
     $channel = null;
     foreach (payChannels() as $ch) { if ($ch['id'] === (string)($order['channel_id'] ?? '')) { $channel = $ch; break; } }
     if (!$channel) $channel = payPickChannel((string)$order['channel']);
-    if (!$channel || !epayVerify($params, $channel['key'])) {
-        securityLog('pay_notify_bad_sign', ['out_trade_no' => $outNo, 'channel' => $order['channel_id'] ?? '']);
-        echo 'fail'; exit;
-    }
 
-    $tradeNo = (string)($params['trade_no'] ?? '');
-    $money   = (string)($params['money'] ?? '0');
-    $status  = (string)($params['trade_status'] ?? '');
+    $driver  = $channel ? payChannelDriver($channel) : 'epay';
+    $tradeNo = '';
+    $money   = '0';
+    $status  = 'TRADE_SUCCESS';
+
+    if ($driver === 'vmqfox') {
+        if (!$channel) { echo 'fail'; exit; }
+        $payId  = (string)($params['payId'] ?? '');
+        $param  = (string)($params['param'] ?? '');
+        $ptype  = (string)($params['type'] ?? '');
+        $price  = (string)($params['price'] ?? '0');
+        $really = (string)($params['reallyPrice'] ?? '0');
+        $sign   = (string)($params['sign'] ?? '');
+        $expect = vmqfoxSignCallback($payId, $param, $ptype, $price, $really, (string)$channel['key']);
+        if ($sign === '' || !hash_equals($expect, $sign)) {
+            securityLog('pay_notify_bad_sign', ['out_trade_no' => $outNo, 'driver' => 'vmqfox']);
+            echo 'fail'; exit;
+        }
+        $tradeNo = (string)($params['orderId'] ?? '');
+        $money   = (float)$really > 0 ? $really : $price;
+    } else {
+        if (!$channel || !epayVerify($params, $channel['key'])) {
+            securityLog('pay_notify_bad_sign', ['out_trade_no' => $outNo, 'channel' => $order['channel_id'] ?? '']);
+            echo 'fail'; exit;
+        }
+        $tradeNo = (string)($params['trade_no'] ?? '');
+        $money   = (string)($params['money'] ?? '0');
+        $status  = (string)($params['trade_status'] ?? '');
+    }
     if ($status !== 'TRADE_SUCCESS') { echo 'success'; exit; }
 
     if (!hash_equals(number_format((float)$order['amount'], 2, '.', ''), number_format((float)$money, 2, '.', ''))) {

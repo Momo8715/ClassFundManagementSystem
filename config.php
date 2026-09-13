@@ -466,6 +466,24 @@ function payMethods(): array {
     return array_values($out);
 }
 
+/**
+ * 支付通道类型（驱动）
+ *   epay   = 彩虹易支付协议（mapi.php + MD5/RSA 签名），需要 网关 / 商户ID / 密钥
+ *   vmqfox = V免签Fox协议（/api/order/create + HMAC-SHA256），只需要 网关 / 通讯密钥
+ */
+function payChannelDriver(array $ch): string {
+    $d = strtolower(trim((string)($ch['driver'] ?? '')));
+    return $d === 'vmqfox' ? 'vmqfox' : 'epay';
+}
+
+/** 通道是否"启用且配置完整"（V免签不需要商户ID） */
+function payChannelReady(array $ch): bool {
+    if (empty($ch['enabled'])) return false;
+    if ((string)($ch['gateway'] ?? '') === '' || (string)($ch['key'] ?? '') === '') return false;
+    if (payChannelDriver($ch) === 'epay' && (string)($ch['pid'] ?? '') === '') return false;
+    return true;
+}
+
 /** 归一化支付通道列表（优先 channels[]，兼容旧版单通道配置） */
 function payChannels(): array {
     $c = getPayConfig();
@@ -478,6 +496,7 @@ function payChannels(): array {
             $out[] = [
                 'id'      => (string)($ch['id'] ?? ('ch' . ($i + 1))),
                 'name'    => (string)($ch['name'] ?? ('通道' . ($i + 1))),
+                'driver'  => payChannelDriver($ch),
                 'gateway' => rtrim((string)($ch['gateway'] ?? ''), '/'),
                 'pid'     => (string)($ch['pid'] ?? ''),
                 'key'     => (string)($ch['key'] ?? ''),
@@ -488,7 +507,7 @@ function payChannels(): array {
     }
     if (empty($out) && $c['gateway'] !== '' && $c['pid'] !== '' && $c['key'] !== '') {
         $out[] = [
-            'id' => 'default', 'name' => '默认通道',
+            'id' => 'default', 'name' => '默认通道', 'driver' => 'epay',
             'gateway' => rtrim((string)$c['gateway'], '/'), 'pid' => (string)$c['pid'], 'key' => (string)$c['key'],
             'types' => ['alipay', 'wxpay', 'qqpay'], 'enabled' => true,
         ];
@@ -500,7 +519,7 @@ function payChannels(): array {
 function payAvailableTypes(): array {
     $types = [];
     foreach (payChannels() as $ch) {
-        if (!$ch['enabled'] || $ch['gateway'] === '' || $ch['pid'] === '' || $ch['key'] === '') continue;
+        if (!payChannelReady($ch)) continue;
         foreach ($ch['types'] as $t) if (!in_array($t, $types, true)) $types[] = $t;
     }
     return $types;
@@ -510,7 +529,7 @@ function payAvailableTypes(): array {
 function payPickChannel(string $type, string $channelId = ''): ?array {
     $fallback = null;
     foreach (payChannels() as $ch) {
-        if (!$ch['enabled'] || $ch['gateway'] === '' || $ch['pid'] === '' || $ch['key'] === '') continue;
+        if (!payChannelReady($ch)) continue;
         if (!in_array($type, $ch['types'], true)) continue;
         if ($channelId !== '' && $ch['id'] === $channelId) return $ch;
         if ($fallback === null) $fallback = $ch;
