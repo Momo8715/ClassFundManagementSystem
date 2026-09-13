@@ -263,6 +263,8 @@ function handleSemesters(string $method) {
         case 'POST':
             requirePermission('manageAllAccounts');
             requireCsrfToken();
+            // 访客（id=0）即使权限被误配也不允许改动学期
+            if ((int)(currentUser()['id'] ?? 0) === 0) jsonOutput(['error' => '访客无权重学期'], 403);
             $input = jsonInput();
             $action = $input['action'] ?? '';
 

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS `transactions` (
   `source_info`     VARCHAR(500) DEFAULT NULL COMMENT '其他来源时的具体来源信息',
   `amount`          DECIMAL(10,2) NOT NULL,
   `expected_amount` DECIMAL(10,2) DEFAULT NULL COMMENT '预缴总金额',
+  `per_person`      DECIMAL(10,2) DEFAULT NULL COMMENT '每人应缴(班费收缴轮次；总额按各轮相加)',
   `date`            DATE NOT NULL,
   `description`     VARCHAR(500) NOT NULL DEFAULT '',
   `payer_ids`       TEXT DEFAULT NULL COMMENT '缴费学生ID(JSON数组或all)',

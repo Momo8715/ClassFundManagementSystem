@@ -24,8 +24,10 @@ if (!isDbInstalled()) {
 // 自动迁移数据库
 autoMigrate();
 
-// IP 黑名单拦截（命中则直接 403，覆盖所有 API 操作）
-requireNotBlockedIp();
+// IP 黑名单拦截（命中则直接 403；支付回调/同步返回由支付平台服务器发起，需放行）
+if (!in_array($_GET['action'] ?? '', ['pay_notify', 'pay_return'], true)) {
+    requireNotBlockedIp();
+}
 
 // 加载所有模块
 require_once __DIR__ . '/src/auth.php';
@@ -36,6 +38,7 @@ require_once __DIR__ . '/src/logs.php';
 require_once __DIR__ . '/src/security.php';
 require_once __DIR__ . '/src/import_export.php';
 require_once __DIR__ . '/src/report.php';
+require_once __DIR__ . '/src/pay.php';
 require_once __DIR__ . '/src/upgrade.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
@@ -62,6 +65,15 @@ $actionMethods = [
     'ban_user' => ['POST'],
     'blocked_ip' => ['GET', 'POST', 'DELETE'],
     'export_security_csv' => ['GET'],
+    'pay_meta' => ['GET'],
+    'pay_create' => ['POST'],
+    'pay_config_get' => ['GET'],
+    'pay_config_save' => ['POST'],
+    'pay_notify' => ['GET', 'POST'],
+    'pay_return' => ['GET'],
+    'pay_orders' => ['GET'],
+    'pay_confirm' => ['POST'],
+    'pay_cancel' => ['POST'],
     'do_upgrade' => ['POST'],
 ];
 if (isset($actionMethods[$action]) && !in_array($method, $actionMethods[$action], true)) {
@@ -186,6 +198,35 @@ switch ($action) {
         break;
     case 'export_security_csv':
         handleExportSecurityCsv();
+        break;
+
+    // ========== 在线支付 ==========
+    case 'pay_meta':
+        handlePayMeta();
+        break;
+    case 'pay_create':
+        handlePayCreate();
+        break;
+    case 'pay_notify':
+        handlePayNotify();
+        break;
+    case 'pay_return':
+        handlePayReturn();
+        break;
+    case 'pay_orders':
+        handlePayOrders();
+        break;
+    case 'pay_confirm':
+        handlePayConfirm();
+        break;
+    case 'pay_cancel':
+        handlePayCancel();
+        break;
+    case 'pay_config_get':
+        handlePayConfigGet();
+        break;
+    case 'pay_config_save':
+        handlePayConfigSave();
         break;
 
     // ========== 远程升级 ==========

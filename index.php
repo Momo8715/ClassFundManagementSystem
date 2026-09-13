@@ -87,15 +87,21 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     .btn-guest,.btn-login{width:100%;padding:13px;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:14px;}
     .btn-guest{background:linear-gradient(135deg,#10b981,#059669);color:#fff;}
     .btn-login{background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;}
-    .form-group{margin-bottom:14px;}
-    .form-group label{display:block;font-size:13px;color:#cbd5e1;margin-bottom:6px;font-family:-apple-system,sans-serif;}
-    .form-group input{width:100%;padding:10px 14px;border:1.5px solid rgba(255,255,255,.15);border-radius:8px;font-size:14px;background:rgba(255,255,255,.06);color:#fff;font-family:inherit;box-sizing:border-box;}
+    .login-card .form-group{margin-bottom:14px;}
+    .login-card .form-group label{display:block;font-size:13px;color:#cbd5e1;margin-bottom:6px;font-family:-apple-system,sans-serif;}
+    .login-card .form-group input{width:100%;padding:10px 14px;border:1.5px solid rgba(255,255,255,.15);border-radius:8px;font-size:14px;background:rgba(255,255,255,.06);color:#fff;font-family:inherit;box-sizing:border-box;}
     .login-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:#94a3b8;font-size:12px;font-family:-apple-system,sans-serif;}
     .login-divider::before,.login-divider::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.12);}
     .hint{font-size:12px;color:#94a3b8;text-align:center;margin-top:12px;font-family:-apple-system,sans-serif;}
     .wave{display:inline-block;}
     </style>
     <link rel="stylesheet" href="assets/css/style.css?v=17" onerror="window.__retryResource(this,'assets/css/style.css?v=17')">
+    <style data-cfasync="false">
+    /* 弹窗可读性修复：登录页表单样式不应影响弹窗（此前导致弹窗文字过淡/看不见） */
+    .modal label{color:var(--text);}
+    .modal h3{color:var(--text);}
+    .modal input,.modal select,.modal textarea{color:var(--text);background:var(--bg-card);}
+    </style>
     <script>
     // PWA Service Worker 注册（仅 HTTPS 生效，失败静默不影响使用）
     if ('serviceWorker' in navigator) {
@@ -106,7 +112,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     </script>
     <!-- 预加载关键资源：提前建立连接/加载JS，减少等待 -->
     <link rel="preload" href="assets/css/style.css?v=17" as="style">
-    <link rel="preload" href="assets/js/app.js?v=32" as="script">
+    <link rel="preload" href="assets/js/app.js?v=38" as="script">
     <link rel="preconnect" href="/" crossorigin>
     <script data-cfasync="false">
     // 防止 app.js 未就绪时点击登录报错：按钮先禁用，JS 加载后启用
@@ -190,15 +196,20 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                 <button data-page="roster" onclick="switchPage('roster')" id="navRoster">
                     <span class="icon">📋</span> 花名册
                 </button>
-                <button data-page="payments" onclick="switchPage('payments')" id="navPayments">
-                    <span class="icon">💳</span> 缴费情况
+                <button data-page="pay" onclick="switchPage('pay')" id="navPay">
+                    <span class="icon">💳</span> 在线缴费
+                </button>
+                <button data-page="payments" onclick="switchPage('payments');window._payLoadOrders&&window._payLoadOrders()" id="navPayments">
+                    <span class="icon">📋</span> 缴费情况
                 </button>
                 <button data-page="logs" onclick="switchPage('logs')" id="navLogs">
                     <span class="icon">📜</span> 操作日志
                 </button>
+                <?php if (hasPermission('viewSecurity')): ?>
                 <button data-page="security" onclick="switchPage('security')" id="navSecurity">
                     <span class="icon">🛡️</span> 安全分析
                 </button>
+                <?php endif; ?>
                 <button data-page="recycle" onclick="switchPage('recycle')" id="navRecycle">
                     <span class="icon">🗑️</span> 回收站
                 </button>
@@ -213,19 +224,29 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
         <main class="main">
             <!-- 仪表盘 -->
             <div class="page active" id="page-dashboard">
-                <div class="cards" id="dashboardCards"></div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;max-width:860px">
-                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
-                        <h4 style="font-size:12px;margin-bottom:6px">📈 月度收支趋势</h4>
-                        <canvas id="chartTrend" height="130"></canvas>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px" data-tabscope="dashTabs">
+                    <button class="btn btn-primary btn-sm" data-tabbtn="overview" onclick="window._tab('dashTabs','overview')">📊 数据概览</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="recent" onclick="window._tab('dashTabs','recent')">📋 最近记录</button>
+                </div>
+                <div id="dashTabs">
+                    <div class="tab-pane" data-pane="overview">
+                        <div class="cards" id="dashboardCards"></div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;max-width:860px">
+                            <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
+                                <h4 style="font-size:12px;margin-bottom:6px">📈 月度收支趋势</h4>
+                                <canvas id="chartTrend" height="130"></canvas>
+                            </div>
+                            <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
+                                <h4 style="font-size:12px;margin-bottom:6px">🍩 支出分类占比</h4>
+                                <canvas id="chartPie" height="130"></canvas>
+                            </div>
+                        </div>
                     </div>
-                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
-                        <h4 style="font-size:12px;margin-bottom:6px">🍩 支出分类占比</h4>
-                        <canvas id="chartPie" height="130"></canvas>
+                    <div class="tab-pane" data-pane="recent" style="display:none">
+                        <div class="section-header"><h3>📋 最近收支记录</h3></div>
+                        <div class="table-wrap" id="dashboardRecent"></div>
                     </div>
                 </div>
-                <div class="section-header"><h3>📋 最近收支记录</h3></div>
-                <div class="table-wrap" id="dashboardRecent"></div>
             </div>
 
             <!-- 学期报表 -->
@@ -244,28 +265,38 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                         <button class="btn btn-outline btn-sm" onclick="window.print()">🖨️ 打印</button>
                     </div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;max-width:860px">
-                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
-                        <h4 style="font-size:12px;margin-bottom:6px">📊 月度收支对比</h4>
-                        <canvas id="reportChartBar" height="130"></canvas>
-                    </div>
-                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
-                        <h4 style="font-size:12px;margin-bottom:6px">🍩 支出分类占比</h4>
-                        <canvas id="reportChartPie" height="130"></canvas>
-                    </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px" data-tabscope="reportTabs">
+                    <button class="btn btn-primary btn-sm" data-tabbtn="report" onclick="window._tab('reportTabs','report')">📈 报表内容</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="semester" onclick="window._tab('reportTabs','semester')">📚 学期管理</button>
                 </div>
-                <div id="reportContent"></div>
-                <div style="margin-top:24px;background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
-                    <h4 style="font-size:14px;margin-bottom:10px">📚 学期管理</h4>
-                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-                        <input type="text" id="semName" placeholder="学期名称，如：2025秋季学期" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:180px;background:var(--bg-card);color:var(--text)">
-                        <input type="date" id="semStart" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
-                        <span style="font-size:12px;color:var(--text-secondary)">至</span>
-                        <input type="date" id="semEnd" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
-                        <button class="btn btn-primary btn-sm" onclick="window._createSemester()">➕ 新建学期</button>
-                        <span style="font-size:11px;color:var(--text-secondary)">期末后归档当前学期，即为「结转」</span>
+                <div id="reportTabs">
+                    <div class="tab-pane" data-pane="report">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;max-width:860px">
+                            <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
+                                <h4 style="font-size:12px;margin-bottom:6px">📊 月度收支对比</h4>
+                                <canvas id="reportChartBar" height="130"></canvas>
+                            </div>
+                            <div style="background:var(--bg-card);border-radius:var(--radius);padding:10px 12px;box-shadow:var(--shadow)">
+                                <h4 style="font-size:12px;margin-bottom:6px">🍩 支出分类占比</h4>
+                                <canvas id="reportChartPie" height="130"></canvas>
+                            </div>
+                        </div>
+                        <div id="reportContent"></div>
                     </div>
-                    <div id="semesterTable"></div>
+                    <div class="tab-pane" data-pane="semester" style="display:none">
+                        <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
+                            <h4 style="font-size:14px;margin-bottom:10px">📚 学期管理</h4>
+                            <div id="semesterCreateForm" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+                                <input type="text" id="semName" placeholder="学期名称，如：2025秋季学期" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;width:180px;background:var(--bg-card);color:var(--text)">
+                                <input type="date" id="semStart" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                                <span style="font-size:12px;color:var(--text-secondary)">至</span>
+                                <input type="date" id="semEnd" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                                <button class="btn btn-primary btn-sm" onclick="window._createSemester()">➕ 新建学期</button>
+                                <span style="font-size:11px;color:var(--text-secondary)">期末后归档当前学期，即为「结转」</span>
+                            </div>
+                            <div id="semesterTable"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -289,6 +320,15 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                             <option value="设备采购">设备采购</option>
                             <option value="其他支出">其他支出</option>
                             <option value="其他">其他</option>
+                        </select>
+                        <select id="filterSubCategory" onchange="window._renderTxPage(1)" style="max-width:120px">
+                            <option value="">全部子分类</option>
+                            <option value="班费收缴">班费收缴</option>
+                            <option value="其他来源">其他来源</option>
+                            <option value="日常支出">日常支出</option>
+                            <option value="活动支出">活动支出</option>
+                            <option value="设备采购">设备采购</option>
+                            <option value="其他支出">其他支出</option>
                         </select>
                         <input type="number" id="filterAmountMin" placeholder="金额≥" min="0" step="0.01" style="width:80px" onchange="window._renderTxPage(1)">
                         <input type="number" id="filterAmountMax" placeholder="金额≤" min="0" step="0.01" style="width:80px" onchange="window._renderTxPage(1)">
@@ -343,54 +383,122 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                         <a href="api.php?action=roster_template" class="btn btn-outline btn-sm" style="text-decoration:none">📥 下载模板</a>
                     </div>
                 </div>
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-                    <input type="file" id="rosterXlsxFile" accept=".xlsx" style="flex:1;min-width:150px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
-                    <button class="btn btn-primary btn-sm" onclick="previewRosterXlsx()">🔍 预览</button>
-                    <button class="btn btn-success btn-sm" onclick="importRosterXlsx()">✅ 导入</button>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px" data-tabscope="rosterTabs">
+                    <button class="btn btn-primary btn-sm" data-tabbtn="list" onclick="window._tab('rosterTabs','list')">📋 花名册</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="import" onclick="window._tab('rosterTabs','import')">📥 导入名单</button>
                 </div>
-                <div id="rosterImportPreview"></div>
-                <div class="table-wrap" id="rosterTable"></div>
+                <div id="rosterTabs">
+                    <div class="tab-pane" data-pane="list">
+                        <div class="table-wrap" id="rosterTable"></div>
+                    </div>
+                    <div class="tab-pane" data-pane="import" style="display:none">
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+                            <input type="file" id="rosterXlsxFile" accept=".xlsx" style="flex:1;min-width:150px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+                            <button class="btn btn-primary btn-sm" onclick="previewRosterXlsx()">🔍 预览</button>
+                            <button class="btn btn-success btn-sm" onclick="importRosterXlsx()">✅ 导入</button>
+                        </div>
+                        <div id="rosterImportPreview"></div>
+                    </div>
+                </div>
             </div>
 
             <!-- 缴费情况 -->
             <div class="page" id="page-payments">
                 <div class="section-header">
                     <h3>💳 缴费情况总览</h3>
-                    <div style="display:flex;gap:8px">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
                         <button class="btn btn-outline btn-sm" onclick="renderPayments()">🔄 刷新</button>
                         <button class="btn btn-outline btn-sm" onclick="exportUnpaid()">📥 导出欠费名单</button>
                     </div>
                 </div>
-                <div style="background:var(--bg-card);border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;box-shadow:var(--shadow);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                    <span style="font-size:13px;white-space:nowrap">每人应缴：</span>
-                    <input type="number" id="perPersonAmt" step="0.01" min="0" style="width:100px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" placeholder="金额">
-                    <button class="btn btn-primary btn-sm" onclick="setPerPerson()">保存</button>
-                    <span style="font-size:11px;color:var(--text-secondary)">| 花名册中可设置免缴学生</span>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px" data-tabscope="payTabs">
+                    <button class="btn btn-primary btn-sm" data-tabbtn="summary" onclick="window._tab('payTabs','summary')">📊 汇总</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="roster" onclick="window._tab('payTabs','roster')">📋 名册缴费</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="rounds" onclick="window._tab('payTabs','rounds')">📅 轮次明细</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="orders" onclick="window._tab('payTabs','orders')">📦 支付订单</button>
                 </div>
-                <div class="cards" id="paymentSummary"></div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-                    <div><h4 style="margin-bottom:8px;color:var(--success)">✅ 已缴纳</h4><div class="table-wrap" id="paidTable"></div></div>
-                    <div><h4 style="margin-bottom:8px;color:var(--danger)">⚠️ 未缴纳</h4><div class="table-wrap" id="unpaidTable"></div></div>
+                <div id="payTabs">
+                    <div class="tab-pane" data-pane="summary">
+                        <div style="background:var(--bg-card);border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;box-shadow:var(--shadow);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                            <span style="font-size:13px;white-space:nowrap">每人应缴（各轮累计）：</span>
+                            <b id="perPersonDisplay" style="font-size:15px;color:var(--primary)">—</b>
+                            <span style="font-size:11px;color:var(--text-secondary)">＝ 各轮「每人应缴」相加；免缴学生在「名册缴费」中设置</span>
+                        </div>
+                        <div class="cards" id="paymentSummary"></div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px">
+                            <div><h4 style="margin-bottom:8px;color:var(--success)">✅ 已缴纳</h4><div class="table-wrap" id="paidTable"></div></div>
+                            <div><h4 style="margin-bottom:8px;color:var(--danger)">⚠️ 未缴纳</h4><div class="table-wrap" id="unpaidTable"></div></div>
+                        </div>
+                    </div>
+                    <div class="tab-pane" data-pane="roster" style="display:none">
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+                            <button class="btn btn-outline btn-sm" onclick="window._batchExempt(1)">🟢 批量设为免缴</button>
+                            <button class="btn btn-outline btn-sm" onclick="window._batchExempt(0)">🔴 批量设为应缴</button>
+                            <span style="font-size:11px;color:var(--text-secondary)">勾选下方名单后操作</span>
+                        </div>
+                        <div class="table-wrap" id="rosterPayTable"></div>
+                    </div>
+                    <div class="tab-pane" data-pane="rounds" style="display:none">
+                        <div id="roundsTable"></div>
+                    </div>
+                    <div class="tab-pane" data-pane="orders" style="display:none">
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+                            <select id="payOrderStatus" onchange="window._payLoadOrders()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                                <option value="">全部状态</option>
+                                <option value="paid">已支付</option>
+                                <option value="pending">待支付</option>
+                                <option value="closed">已关闭</option>
+                            </select>
+                            <button class="btn btn-outline btn-sm" onclick="window._payLoadOrders()">🔄 刷新</button>
+                            <span id="payOrderSummary" style="font-size:12px;color:var(--text-secondary)"></span>
+                        </div>
+                        <div class="table-wrap" id="payOrdersTable"></div>
+                    </div>
                 </div>
-                <h4 style="margin-top:12px;color:var(--text-secondary)">📋 花名册缴费管理</h4>
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-                    <button class="btn btn-outline btn-sm" onclick="window._batchExempt(1)">🟢 批量设为免缴</button>
-                    <button class="btn btn-outline btn-sm" onclick="window._batchExempt(0)">🔴 批量设为应缴</button>
-                    <span style="font-size:11px;color:var(--text-secondary)">勾选下方名单后操作</span>
-                </div>
-                <div class="table-wrap" id="rosterPayTable"></div>
-                <h4 style="margin-top:16px;color:var(--primary)">📅 各轮缴费明细</h4>
-                <div id="roundsTable"></div>
             </div>
 
-            <!-- 安全分析 -->
+            <!-- 在线缴费（所有登录/访客用户） -->
+            <div class="page" id="page-pay">
+                <div class="section-header"><h3>💳 在线缴费</h3></div>
+                <div style="background:var(--bg-card);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                    <span style="font-size:13px">我是</span>
+                    <select id="payStudent" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;background:var(--bg-card);color:var(--text);min-width:130px">
+                        <option value="0">请选择姓名</option>
+                    </select>
+                    <span style="font-size:13px">缴纳</span>
+                    <select id="payRound" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;background:var(--bg-card);color:var(--text);max-width:220px">
+                        <option value="0">本次班费</option>
+                    </select>
+                    <select id="payChannel" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;background:var(--bg-card);color:var(--text)">
+                        <option value="alipay">支付宝</option>
+                        <option value="wxpay">微信支付</option>
+                        <option value="qqpay">QQ 钱包</option>
+                    </select>
+                    <span id="payAmountHint" style="font-size:13px;color:var(--danger);font-weight:600"></span>
+                    <button class="btn btn-primary" onclick="window._payCreate()" id="btnPayCreate">💳 立即支付</button>
+                </div>
+                <p id="payConfigHint" style="font-size:12px;color:var(--text-secondary);margin-top:8px"></p>
+                <div id="payResult" style="margin-top:12px"></div>
+            </div>
+
+            <!-- 安全分析（仅管理员可查看） -->
+            <?php if (hasPermission('viewSecurity')): ?>
             <div class="page" id="page-security">
                 <div class="section-header">
                     <h3>🛡️ 安全分析中心</h3>
                     <button class="btn btn-outline btn-sm" onclick="renderSecurity()">🔄 刷新</button>
                 </div>
-                <div class="cards" id="securitySummary"></div>
-                <div class="toolbar" style="flex-wrap:wrap;margin:14px 0 6px">
+                <!-- 二级分类导航（分页签，避免长滚动） -->
+                <div id="secTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px">
+                    <button class="btn btn-primary btn-sm" data-sectab="overview" onclick="window._secTab('overview')">📊 概览</button>
+                    <button class="btn btn-outline btn-sm" data-sectab="login" onclick="window._secTab('login')">🔍 登录分析</button>
+                    <button class="btn btn-outline btn-sm" data-sectab="detail" onclick="window._secTab('detail')">📋 明细与事件</button>
+                    <button class="btn btn-outline btn-sm" data-sectab="manage" onclick="window._secTab('manage')">⛔ IP与账号</button>
+                    <button class="btn btn-outline btn-sm" data-sectab="system" onclick="window._secTab('system')">⚙️ 系统设置</button>
+                </div>
+
+                <!-- 控制栏（筛选，随页签显隐） -->
+                <div class="toolbar" id="secFilters" style="flex-wrap:wrap;margin:10px 0 6px">
                     <span style="font-size:12px;color:var(--text-secondary)">统计范围</span>
                     <select id="secRange" onchange="window._secReload(1)">
                         <option value="24h">近24小时</option>
@@ -410,65 +518,123 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <button class="btn btn-outline btn-sm" onclick="window._secReset()">↺ 重置</button>
                     <button class="btn btn-outline btn-sm" onclick="window._secExport()">📥 导出审计 CSV</button>
                 </div>
-                <h4 style="margin-bottom:8px;color:var(--danger)">🔍 同指纹多账号</h4>
-                <div class="table-wrap" id="multiAccountTable"></div>
-                <h4 style="margin:16px 0 8px;color:#f59e0b">🌍 同账号多IP</h4>
-                <div class="table-wrap" id="multiIpTable"></div>
-                <h4 style="margin:16px 0 8px;color:var(--danger)">🚨 登录失败统计</h4>
-                <div class="table-wrap" id="failuresTable"></div>
 
-                <!-- ===== 安全增强（v1.8） ===== -->
-                <div class="cards" id="secSummaryExtra" style="margin-top:16px"></div>
-
-                <h4 style="margin:16px 0 8px;color:var(--danger)">🚫 可疑 IP（失败 ≥ 3 次）</h4>
-                <div class="table-wrap" id="ipRiskTable"></div>
-
-                <h4 style="margin:16px 0 8px;color:#f59e0b">🧭 同 IP 多账号</h4>
-                <div class="table-wrap" id="ipMultiAccountTable"></div>
-
-                <h4 style="margin:16px 0 8px;color:var(--text-secondary)">📉 登录失败原因分布</h4>
-                <div class="table-wrap" id="failReasonTable"></div>
-
-                <h4 style="margin:16px 0 8px;color:var(--danger)">⛔ IP 黑名单</h4>
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
-                    <input type="text" id="blockIpInput" placeholder="要封禁的 IP，如 1.2.3.4" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:200px">
-                    <input type="text" id="blockIpReason" placeholder="原因（可选）" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:180px">
-                    <button class="btn btn-danger btn-sm" onclick="window._blockIp()">⛔ 封禁 IP</button>
-                    <span style="font-size:11px;color:var(--text-secondary)">命中黑名单的 IP 将被 API 层直接拒绝</span>
+                <!-- 页签：概览 -->
+                <div class="sec-pane" data-pane="overview">
+                    <div class="cards" id="securitySummary"></div>
+                    <div class="cards" id="secSummaryExtra" style="margin-top:16px"></div>
+                    <h4 style="margin:16px 0 8px;color:var(--primary)">🧮 风险评分构成</h4>
+                    <div class="table-wrap" id="riskBreakdown"></div>
+                    <h4 style="margin:16px 0 8px;color:var(--primary)">👤 用户安全画像</h4>
+                    <div class="table-wrap" id="userProfileTable"></div>
+                    <h4 style="margin:16px 0 8px;color:var(--primary)">🕒 登录时段分布（0-23 时）</h4>
+                    <div class="table-wrap" id="hourlyTable"></div>
+                    <h4 style="margin:16px 0 8px;color:#f59e0b">🆕 新 IP 登录（该账号首次出现的 IP）</h4>
+                    <div class="table-wrap" id="newIpTable"></div>
                 </div>
-                <div class="table-wrap" id="blockedIpTable"></div>
 
-                <h4 style="margin:16px 0 8px;color:#f59e0b">🚷 已封禁账号</h4>
-                <div class="table-wrap" id="bannedUsersTable"></div>
-
-                <h4 style="margin:16px 0 8px;color:var(--primary)">🧾 安全事件（最近 50 条）</h4>
-                <div class="table-wrap" id="securityEventsTable"></div>
-
-                <!-- ===== 安全细化（v1.8） ===== -->
-                <h4 style="margin:16px 0 8px;color:var(--primary)">🧮 风险评分构成</h4>
-                <div class="table-wrap" id="riskBreakdown"></div>
-
-                <h4 style="margin:16px 0 8px;color:var(--primary)">👤 用户安全画像</h4>
-                <div class="table-wrap" id="userProfileTable"></div>
-
-                <h4 style="margin:16px 0 8px;color:var(--primary)">🕒 登录时段分布（0-23 时）</h4>
-                <div class="table-wrap" id="hourlyTable"></div>
-
-                <h4 style="margin:16px 0 8px;color:#f59e0b">🆕 新 IP 登录（该账号首次出现的 IP）</h4>
-                <div class="table-wrap" id="newIpTable"></div>
-
-                <h4 style="margin:16px 0 8px;color:var(--primary)">📋 登录明细（可按范围/用户/结果/IP 筛选）</h4>
-                <div class="table-wrap" id="loginDetailTable"></div>
-                <div class="pagination" id="loginDetailPagination"></div>
-
-                <h4 style="margin:16px 0 8px;color:var(--primary)">🔄 远程升级</h4>
-                <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);margin-bottom:8px">
-                    <button class="btn btn-primary btn-sm" onclick="checkUpdate()">🔍 检查更新</button>
-                    <button class="btn btn-success btn-sm" onclick="doUpgrade()" style="margin-left:8px;display:none" id="btnUpgrade">🚀 立即升级</button>
-                    <span id="upgradeStatus" style="margin-left:12px;font-size:13px"></span>
+                <!-- 页签：登录分析 -->
+                <div class="sec-pane" data-pane="login" style="display:none">
+                    <h4 style="margin-bottom:8px;color:var(--danger)">🔍 同指纹多账号</h4>
+                    <div class="table-wrap" id="multiAccountTable"></div>
+                    <h4 style="margin:16px 0 8px;color:#f59e0b">🌍 同账号多IP</h4>
+                    <div class="table-wrap" id="multiIpTable"></div>
+                    <h4 style="margin:16px 0 8px;color:#f59e0b">🧭 同 IP 多账号</h4>
+                    <div class="table-wrap" id="ipMultiAccountTable"></div>
+                    <h4 style="margin:16px 0 8px;color:var(--danger)">🚨 登录失败统计</h4>
+                    <div class="table-wrap" id="failuresTable"></div>
+                    <h4 style="margin:16px 0 8px;color:var(--text-secondary)">📉 登录失败原因分布</h4>
+                    <div class="table-wrap" id="failReasonTable"></div>
+                    <h4 style="margin:16px 0 8px;color:var(--danger)">🚫 可疑 IP（失败 ≥ 3 次）</h4>
+                    <div class="table-wrap" id="ipRiskTable"></div>
                 </div>
+
+                <!-- 页签：明细与事件 -->
+                <div class="sec-pane" data-pane="detail" style="display:none">
+                    <h4 style="margin-bottom:8px;color:var(--primary)">📋 登录明细（可按范围/用户/结果/IP 筛选）</h4>
+                    <div class="table-wrap" id="loginDetailTable"></div>
+                    <div class="pagination" id="loginDetailPagination"></div>
+                    <h4 style="margin:16px 0 8px;color:var(--primary)">🧾 安全事件（最近 50 条）</h4>
+                    <div class="table-wrap" id="securityEventsTable"></div>
+                </div>
+
+                <!-- 页签：IP 与账号 -->
+                <div class="sec-pane" data-pane="manage" style="display:none">
+                    <h4 style="margin-bottom:8px;color:var(--danger)">⛔ IP 黑名单</h4>
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+                        <input type="text" id="blockIpInput" placeholder="要封禁的 IP，如 1.2.3.4" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:200px">
+                        <input type="text" id="blockIpReason" placeholder="原因（可选）" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:180px">
+                        <button class="btn btn-danger btn-sm" onclick="window._blockIp()">⛔ 封禁 IP</button>
+                        <span style="font-size:11px;color:var(--text-secondary)">命中黑名单的 IP 将被 API 层直接拒绝</span>
+                    </div>
+                    <div class="table-wrap" id="blockedIpTable"></div>
+                    <h4 style="margin:16px 0 8px;color:#f59e0b">🚷 已封禁账号</h4>
+                    <div class="table-wrap" id="bannedUsersTable"></div>
+                </div>
+
+                <!-- 页签：系统设置 -->
+                <div class="sec-pane" data-pane="system" style="display:none">
+                    <h4 style="margin-bottom:8px;color:var(--primary)">⚙️ 支付通道设置（易支付 · 支持多通道）</h4>
+                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);max-width:900px">
+                        <div id="payCfgStatus" style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">加载中…</div>
+                        <div style="display:grid;grid-template-columns:130px 1fr;gap:8px 10px;align-items:center;max-width:620px">
+                            <label style="font-size:13px">核销模式</label>
+                            <select id="payCfgSettle" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
+                                <option value="auto">支付成功自动核销</option>
+                                <option value="manual">班委手动确认核销</option>
+                            </select>
+                            <label style="font-size:13px">默认支付方式</label>
+                            <select id="payCfgDefaultType" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
+                                <option value="alipay">支付宝</option>
+                                <option value="wxpay">微信支付</option>
+                                <option value="qqpay">QQ 钱包</option>
+                            </select>
+                            <label style="font-size:13px">单笔金额</label>
+                            <div style="display:flex;gap:6px;align-items:center">
+                                <input type="number" id="payCfgMin" step="0.01" style="width:100px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)"><span>~</span>
+                                <input type="number" id="payCfgMax" step="0.01" style="width:100px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                            </div>
+                            <label style="font-size:13px">站点名</label>
+                            <input type="text" id="payCfgSitename" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
+                            <label style="font-size:13px">启用</label>
+                            <label style="font-size:13px"><input type="checkbox" id="payCfgEnabled"> 开启在线支付</label>
+                        </div>
+
+                        <div style="margin-top:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                            <b style="font-size:13px">支付方式</b>
+                            <button class="btn btn-outline btn-sm" onclick="window._payCfgAddMethod()">➕ 添加支付方式</button>
+                            <span style="font-size:11px;color:var(--text-secondary)">代码需与易支付网关一致（如 alipay / wxpay / qqpay / jdpay），显示名仅用于前端展示</span>
+                        </div>
+                        <div id="payCfgMethods" style="margin-top:8px"></div>
+
+                        <div style="margin-top:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                            <b style="font-size:13px">支付通道</b>
+                            <button class="btn btn-outline btn-sm" onclick="window._payCfgAddChannel()">➕ 添加通道</button>
+                            <span style="font-size:11px;color:var(--text-secondary)">一个通道 = 一个易支付网关；勾选它支持的支付方式，可添加多个</span>
+                        </div>
+                        <div id="payCfgChannels" style="margin-top:10px;display:flex;flex-direction:column;gap:10px"></div>
+
+                        <div style="margin-top:14px;font-size:12px;color:var(--text-secondary);line-height:1.9">
+                            异步回调：<code id="payCfgNotify">-</code><br>
+                            同步跳转：<code id="payCfgReturn">-</code>
+                        </div>
+                        <div style="margin-top:12px">
+                            <button class="btn btn-primary btn-sm" onclick="window._paySettingsSave()">💾 保存设置</button>
+                            <span style="font-size:11px;color:var(--text-secondary);margin-left:8px">密钥保存后仅显示后 4 位，不再回显</span>
+                        </div>
+                    </div>
+
+                    <h4 style="margin:16px 0 8px;color:var(--primary)">🔄 远程升级</h4>
+                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);margin-bottom:8px">
+                        <button class="btn btn-primary btn-sm" onclick="checkUpdate()">🔍 检查更新</button>
+                        <button class="btn btn-success btn-sm" onclick="doUpgrade()" style="margin-left:8px;display:none" id="btnUpgrade">🚀 立即升级</button>
+                        <span id="upgradeStatus" style="margin-left:12px;font-size:13px"></span>
+                    </div>
+                </div>
+
             </div>
 
+            <?php endif; ?>
             <!-- 回收站 -->
             <div class="page" id="page-recycle">
                 <div class="section-header">
@@ -517,7 +683,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
             <div class="form-group" id="txSubCatGroup"><label>子分类</label><select id="txSubCategory"></select></div>
             <div class="form-group" id="txSourceGroup" style="display:none"><label>来源信息</label><input type="text" id="txSourceInfo" placeholder="如：企业赞助、个人捐赠"></div>
             <div class="form-group" id="txRosterGroup" style="display:none">
-                <label>缴费学生</label>
+                <label>缴费名单（勾选已缴学生；点右侧「免缴」设置本轮免缴）</label>
                 <div style="display:flex;gap:6px;margin-bottom:6px">
                     <button type="button" class="btn btn-outline btn-sm" onclick="selectAllRoster()">✅ 全部缴纳</button>
                     <button type="button" class="btn btn-outline btn-sm" onclick="clearRoster()">❌ 清除</button>
@@ -526,10 +692,10 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
             </div>
             <div class="form-group" id="txExpectedGroup" style="display:none"><label>应收总额（元）</label><input type="number" id="txExpected" step="0.01" min="0" placeholder="全班预计总收入" onchange="calcPerPerson()"></div>
             <div class="form-group" id="txPerPersonGroup" style="display:none"><label>每人应缴（元）</label><input type="number" id="txPerPerson" step="0.01" min="0" placeholder="单人应缴金额" onchange="calcExpected()"></div>
-            <div class="form-group"><label>金额（元）</label><input type="number" id="txAmount" step="0.01" min="0.01"></div>
+            <div class="form-group" id="txAmountGroup"><label>金额（元）</label><input type="number" id="txAmount" step="0.01" min="0.01"></div>
             <div class="form-group"><label>日期</label><input type="date" id="txDate"></div>
             <div class="form-group"><label>描述</label><input type="text" id="txDesc" placeholder="简要描述"></div>
-            <div class="form-group">
+            <div class="form-group" id="txCategoryGroup">
                 <label>分类</label>
                 <select id="txCategory">
                     <option value="班费">班费</option>
@@ -542,7 +708,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <option value="其他支出">其他支出</option>
                 </select>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="txImageGroup">
                 <label>凭证图片（可选，可多张）</label>
                 <div style="display:flex;gap:8px">
                     <input type="file" id="txImageFile" accept="image/*" multiple style="flex:1">
@@ -602,9 +768,15 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=32" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=32')"></script>
+    <script src="assets/js/app.js?v=38" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=38')"></script>
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
-    <script src="assets/js/security.js?v=2" defer data-cfasync="false"></script>
+    <script src="assets/js/security.js?v=4" defer data-cfasync="false"></script>
+    <!-- 在线支付面板（v1.8.1） -->
+    <script src="assets/js/pay.js?v=7" defer data-cfasync="false"></script>
+    <!-- 通用二级分类页签（多分栏页面） -->
+    <script src="assets/js/tabs.js?v=1" defer data-cfasync="false"></script>
+    <!-- 收支弹窗「班费收缴」简化模式 -->
+    <script src="assets/js/modal-tx.js?v=1" defer data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">

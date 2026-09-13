@@ -85,6 +85,7 @@ function handleTransactionsGet() {
     $search = trim($_GET['search'] ?? '');
     $id     = intval($_GET['id'] ?? 0);
     $category = trim($_GET['category'] ?? '');
+    $subCategory = trim($_GET['sub_category'] ?? '');
     $amountMin = isset($_GET['amount_min']) && $_GET['amount_min'] !== '' ? floatval($_GET['amount_min']) : 0;
     $amountMax = isset($_GET['amount_max']) && $_GET['amount_max'] !== '' ? floatval($_GET['amount_max']) : 0;
     $recorder = trim($_GET['recorder'] ?? '');
@@ -126,6 +127,12 @@ function handleTransactionsGet() {
         $sql .= $where;
         $countSql .= $where;
         $params[':cat'] = $category;
+    }
+    if ($subCategory !== '') {
+        $where = " AND t.sub_category = :subcat";
+        $sql .= $where;
+        $countSql .= $where;
+        $params[':subcat'] = $subCategory;
     }
     if ($amountMin > 0) {
         $where = " AND t.amount >= :amin";
@@ -223,6 +230,18 @@ function handleTransactionsPost() {
         $payerIds = null;
     }
 
+    // 每人应缴（班费收缴轮次；总额 = 各轮每人应缴相加，不做除法）
+    $perPerson = null;
+    if ($subCat === '班费收缴') {
+        $ppIn = $input['per_person'] ?? null;
+        if ($ppIn !== null && $ppIn !== '' && floatval($ppIn) > 0) {
+            $perPerson = sanitizeAmount($ppIn);
+        } elseif ($expAmt !== null && $expAmt > 0) {
+            $eligible = (int)db()->query("SELECT COUNT(*) FROM class_roster WHERE exempt=0")->fetchColumn();
+            if ($eligible > 0) $perPerson = round($expAmt / $eligible, 2);
+        }
+    }
+
     // 单次免缴学生ID（v1.6）
     $exemptIdsJson = normalizeIdList($exemptIds);
 
@@ -239,13 +258,14 @@ function handleTransactionsPost() {
         }
     } catch (\Exception $e) { /* 检测失败不影响保存 */ }
 
-    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, date, description, payer_ids, exempt_ids, category, image_path, images, image_ids, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :d, :desc, :pids, :eids, :cat, :img, :imgs, :iids, :rb)");
+    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, per_person, date, description, payer_ids, exempt_ids, category, image_path, images, image_ids, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :pp, :d, :desc, :pids, :eids, :cat, :img, :imgs, :iids, :rb)");
     $stmt->execute([
         ':t'    => $type,
         ':sc'   => $subCat ?: null,
         ':si'   => ($subCat === '其他来源') ? $sourceInfo : null,
         ':a'    => $amount,
         ':ea'   => $expAmt,
+        ':pp'   => $perPerson,
         ':d'    => $date,
         ':desc' => $desc,
         ':pids' => $payerIds,
@@ -262,6 +282,9 @@ function handleTransactionsPost() {
     if ($imageIdsJson) {
         linkImagesToTransaction($newId, json_decode($imageIdsJson, true));
     }
+
+    // 同步全局「每人应缴」（用于缴费页展示；总额计算以各轮 per_person 相加为准）
+    if ($subCat === '班费收缴' && $perPerson !== null && $perPerson > 0) setMeta('per_person', (string)$perPerson);
 
     addLog($user['id'], $user['username'], 'create_transaction', 'transaction', $newId, [
         'type' => $type, 'amount' => $amount, 'date' => $date, 'description' => $desc
@@ -357,13 +380,26 @@ function handleTransactionsPut() {
             $newExemptIds = $old['exempt_ids'] ?? null;
         }
 
-        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, date=:d, description=:desc, payer_ids=:pids, exempt_ids=:eids, category=:cat, image_path=:img, images=:imgs, image_ids=:iids WHERE id=:id");
+        // 每人应缴（班费收缴轮次）
+        if (array_key_exists('per_person', $input)) {
+            $ppIn = $input['per_person'];
+            $newPerPerson = ($ppIn !== null && $ppIn !== '' && floatval($ppIn) > 0) ? sanitizeAmount($ppIn) : null;
+        } else {
+            $newPerPerson = $old['per_person'] ?? null;
+        }
+        if ($newSubCat === '班费收缴' && $newPerPerson === null && $newExpAmt !== null && (float)$newExpAmt > 0) {
+            $eligible = (int)db()->query("SELECT COUNT(*) FROM class_roster WHERE exempt=0")->fetchColumn();
+            if ($eligible > 0) $newPerPerson = round((float)$newExpAmt / $eligible, 2);
+        }
+
+        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, per_person=:pp, date=:d, description=:desc, payer_ids=:pids, exempt_ids=:eids, category=:cat, image_path=:img, images=:imgs, image_ids=:iids WHERE id=:id");
         $stmt->execute([
             ':t'    => $newType,
             ':sc'   => $newSubCat,
             ':si'   => $newSrcInfo,
             ':a'    => $newAmount,
             ':ea'   => $newExpAmt,
+            ':pp'   => $newPerPerson,
             ':d'    => $newDate,
             ':desc' => $newDesc,
             ':pids' => $newPayerIds,
@@ -379,6 +415,9 @@ function handleTransactionsPut() {
         if ($newImageIds) {
             linkImagesToTransaction($id, json_decode($newImageIds, true));
         }
+
+        // 同步全局「每人应缴」（展示用；总额以各轮 per_person 相加为准）
+        if ($newSubCat === '班费收缴' && $newPerPerson !== null && $newPerPerson > 0) setMeta('per_person', (string)$newPerPerson);
 
         $user = currentUser();
         addLog($user['id'], $user['username'], 'update_transaction', 'transaction', $id);

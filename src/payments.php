@@ -199,39 +199,38 @@ function handlePayments() {
     $nonExempt = array_filter($roster, function ($s) { return !$s['exempt']; });
     $nonExemptCount = count($nonExempt);
 
-    // 获取每人应缴金额（system_meta 全局配置 → 交易推算 → 0）
-    $perPerson = round((float)getMeta('per_person', '0'), 2);
-    if ($perPerson <= 0 && $nonExemptCount > 0) {
-        // 回退1：从最新班费收缴交易的 expected_amount 推算
-        $stmt = db()->query("SELECT expected_amount FROM transactions WHERE type='income' AND sub_category='班费收缴' AND expected_amount IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
-        $last = $stmt->fetch();
-        if ($last) {
-            $perPerson = round(floatval($last['expected_amount']) / $nonExemptCount, 2);
+    // 应缴口径：各轮「每人应缴」相加（per_person），不做除法
+    $perPersonSum = 0.0;
+    $hasExplicit = false;
+    foreach ($txs as $t) {
+        if (isset($t['per_person']) && $t['per_person'] !== null && (float)$t['per_person'] > 0) {
+            $perPersonSum += (float)$t['per_person'];
+            $hasExplicit = true;
         }
     }
-    if ($perPerson <= 0 && $nonExemptCount > 0) {
-        // 回退2：payer_ids='all' 的交易金额 / 人数
-        $stmt = db()->query("SELECT amount FROM transactions WHERE type='income' AND sub_category='班费收缴' AND payer_ids='all' AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
-        $last = $stmt->fetch();
-        if ($last) {
-            $perPerson = round(floatval($last['amount']) / $nonExemptCount, 2);
+    if ($hasExplicit) {
+        $perPerson = round($perPersonSum, 2);
+    } else {
+        // 旧数据无显式 per_person：全局配置兜底（不累加）
+        $perPerson = round((float)getMeta('per_person', '0'), 2);
+        if ($perPerson <= 0 && $nonExemptCount > 0) {
+            $stmt = db()->query("SELECT expected_amount FROM transactions WHERE type='income' AND sub_category='班费收缴' AND expected_amount IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+            $last = $stmt->fetch();
+            if ($last) $perPerson = round(floatval($last['expected_amount']) / $nonExemptCount, 2);
         }
-    }
-    if ($perPerson <= 0 && $nonExemptCount > 0) {
-        // 回退3：任意班费收缴交易 → 金额 / 缴费人数
-        $stmt = db()->query("SELECT amount, payer_ids FROM transactions WHERE type='income' AND sub_category='班费收缴' AND payer_ids IS NOT NULL AND payer_ids != '' AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
-        $last = $stmt->fetch();
-        if ($last) {
-            $pids = json_decode($last['payer_ids'], true) ?: [];
-            $payerCount = count($pids);
-            if ($payerCount > 0) {
-                $perPerson = round(floatval($last['amount']) / $payerCount, 2);
+        if ($perPerson <= 0 && $nonExemptCount > 0) {
+            $stmt = db()->query("SELECT amount FROM transactions WHERE type='income' AND sub_category='班费收缴' AND payer_ids='all' AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+            $last = $stmt->fetch();
+            if ($last) $perPerson = round(floatval($last['amount']) / $nonExemptCount, 2);
+        }
+        if ($perPerson <= 0 && $nonExemptCount > 0) {
+            $stmt = db()->query("SELECT amount, payer_ids FROM transactions WHERE type='income' AND sub_category='班费收缴' AND payer_ids IS NOT NULL AND payer_ids != '' AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+            $last = $stmt->fetch();
+            if ($last) {
+                $pids2 = json_decode($last['payer_ids'], true) ?: [];
+                if (count($pids2) > 0) $perPerson = round(floatval($last['amount']) / count($pids2), 2);
             }
         }
-    }
-    // 推算结果同步到全局配置，避免下次重复推算
-    if ($perPerson > 0 && getMeta('per_person') === '') {
-        setMeta('per_person', (string)$perPerson);
     }
     $totalExpected = round($perPerson * $nonExemptCount, 2);
 
@@ -257,7 +256,9 @@ function handlePayments() {
                 $eligibleCount++;
             }
             if ($eligibleCount > 0) {
-                $perPersonThisRound = round($tx['amount'] / $eligibleCount, 2);
+                $perPersonThisRound = (isset($tx['per_person']) && $tx['per_person'] !== null && (float)$tx['per_person'] > 0)
+                    ? round((float)$tx['per_person'], 2)
+                    : round($tx['amount'] / $eligibleCount, 2);
                 foreach ($roster as $s) {
                     if ($s['exempt']) continue;
                     if (in_array($s['id'], $exids)) continue;
@@ -273,7 +274,9 @@ function handlePayments() {
                 if (!$found) $roundUnpaid[] = ['name' => $s['name'], 'amount' => 0];
             }
         } elseif (!empty($pids)) {
-            $perPersonThisRound = round($tx['amount'] / count($pids), 2);
+            $perPersonThisRound = (isset($tx['per_person']) && $tx['per_person'] !== null && (float)$tx['per_person'] > 0)
+                ? round((float)$tx['per_person'], 2)
+                : round($tx['amount'] / count($pids), 2);
             foreach ($pids as $pid) {
                 if (isset($ps[$pid])) {
                     $ps[$pid]['paid'] += $perPersonThisRound;
@@ -303,6 +306,15 @@ function handlePayments() {
             'unpaid_count'  => count($roundUnpaid),
             'exempt_count'  => count($roundExempt),
         ];
+    }
+
+    // 在线支付核销金额：按学生归属计入已缴（子分类「线上缴费」的账目不计入轮次，避免污染轮次）
+    $onlinePaid = [];
+    foreach (db()->query("SELECT student_id, COALESCE(SUM(amount),0) paid FROM fee_payments GROUP BY student_id")->fetchAll() as $fp) {
+        $sid = (int)$fp['student_id'];
+        if ($sid <= 0) continue;
+        $onlinePaid[$sid] = round((float)$fp['paid'], 2);
+        if (isset($ps[$sid])) $ps[$sid]['paid'] += $onlinePaid[$sid];
     }
 
     // 分类已缴/未缴：最近一轮单次免缴的学生不计入未缴（本轮不催缴）
@@ -337,6 +349,7 @@ function handlePayments() {
         'unpaid_list'     => $unpaid,
         'roster'          => $roster,
         'rounds'          => $rounds,
+        'online_paid'     => $onlinePaid,
     ]);
 }
 
@@ -364,7 +377,8 @@ function handleExportUnpaid() {
                 $eligibleCount++;
             }
             if ($eligibleCount > 0) {
-                $each = round($tx['amount'] / $eligibleCount, 2);
+                $each = (isset($tx['per_person']) && $tx['per_person'] !== null && (float)$tx['per_person'] > 0)
+                    ? round((float)$tx['per_person'], 2) : round($tx['amount'] / $eligibleCount, 2);
                 foreach ($roster as $s) {
                     if ($s['exempt']) continue;
                     if (in_array($s['id'], $exids)) continue;
@@ -372,18 +386,34 @@ function handleExportUnpaid() {
                 }
             }
         } elseif (!empty($pids)) {
-            $each = round($tx['amount'] / count($pids), 2);
+            $each = (isset($tx['per_person']) && $tx['per_person'] !== null && (float)$tx['per_person'] > 0)
+                ? round((float)$tx['per_person'], 2) : round($tx['amount'] / count($pids), 2);
             foreach ($pids as $pid) if (isset($ps[$pid])) $ps[$pid]['paid'] += $each;
         }
     }
 
-    // 与缴费页 handlePayments 的判定保持一致：未缴清（含部分缴费）也应列入欠费名单
-    $perPerson = round((float)getMeta('per_person', '0'), 2);
-    if ($perPerson <= 0 && $nonExemptCount > 0) {
-        // 回退：从最新班费收缴交易的 expected_amount 推算每人应缴
-        $stmt = db()->query("SELECT expected_amount FROM transactions WHERE type='income' AND sub_category='班费收缴' AND expected_amount IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
-        $last = $stmt->fetch();
-        if ($last) $perPerson = round(floatval($last['expected_amount']) / $nonExemptCount, 2);
+    // 在线支付核销金额计入已缴
+    foreach (db()->query("SELECT student_id, COALESCE(SUM(amount),0) paid FROM fee_payments GROUP BY student_id")->fetchAll() as $fp) {
+        $sid = (int)$fp['student_id'];
+        if ($sid > 0 && isset($ps[$sid])) $ps[$sid]['paid'] += (float)$fp['paid'];
+    }
+
+    // 与缴费页 handlePayments 口径一致：累计应缴 = 各轮 per_person 相加（不做除法）
+    $perPersonSum2 = 0.0; $hasExplicit2 = false;
+    foreach ($txs as $t) {
+        if (isset($t['per_person']) && $t['per_person'] !== null && (float)$t['per_person'] > 0) {
+            $perPersonSum2 += (float)$t['per_person']; $hasExplicit2 = true;
+        }
+    }
+    if ($hasExplicit2) {
+        $perPerson = round($perPersonSum2, 2);
+    } else {
+        $perPerson = round((float)getMeta('per_person', '0'), 2);
+        if ($perPerson <= 0 && $nonExemptCount > 0) {
+            $stmt = db()->query("SELECT expected_amount FROM transactions WHERE type='income' AND sub_category='班费收缴' AND expected_amount IS NOT NULL AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+            $last = $stmt->fetch();
+            if ($last) $perPerson = round(floatval($last['expected_amount']) / $nonExemptCount, 2);
+        }
     }
 
     // 最近一轮单次免缴的学生：不计入欠费名单（本轮不催缴）
@@ -420,6 +450,6 @@ function handleExportUnpaid() {
         $rows[] = ['合计', '欠费 ' . count($rows) . ' 人', '', '已缴 ¥' . number_format($totalPaidOfOwe, 2, '.', ''), '欠费 ¥' . number_format($totalOwe, 2, '.', ''), ''];
     }
 
-    outputSimpleXlsx('欠费名单_' . date('Ymd_His'), '欠费名单', ['序号', '姓名', '每人应缴', '已缴金额', '欠费金额', '状态'], $rows);
+    outputSimpleXlsx('欠费名单_' . date('Ymd_His'), '欠费名单', ['序号', '姓名', '累计应缴', '已缴金额', '欠费金额', '状态'], $rows);
     exit;
 }

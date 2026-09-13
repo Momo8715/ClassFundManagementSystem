@@ -1,6 +1,9 @@
 # 数据库配置（含密码）- 绝对不能提交
 db_config.json
 
+# 支付通道配置（含商户密钥）- 绝对不能提交
+pay_config.php
+
 # 部署配置（含宝塔 API 密钥）- 绝对不能提交
 .env.deploy
 
@@ -36,3 +39,6 @@ _emoji_test.txt
 
 # 发布产物
 *.zip
+
+# 工作区 Agent Notes（仅本地，不发布到公开仓库）
+.agents/

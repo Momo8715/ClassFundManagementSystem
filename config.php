@@ -97,6 +97,10 @@ function autoMigrate(): void {
         if (!in_array('deleted_at',   $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL COMMENT '软删除时间' AFTER updated_at");
         // 预缴金额（班费收缴）
         if (!in_array('expected_amount', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN expected_amount DECIMAL(10,2) DEFAULT NULL COMMENT '预缴总金额' AFTER amount");
+        // transactions.per_person：每轮班费收缴的「每人应缴」（v1.11，总额按各轮相加，不做除法）
+        if (!in_array('per_person', $cols)) {
+            $db->exec("ALTER TABLE transactions ADD COLUMN per_person DECIMAL(10,2) DEFAULT NULL COMMENT '每人应缴(班费收缴轮次)' AFTER expected_amount");
+        }
 
         // operation_logs 表新增字段检测
         try {
@@ -228,6 +232,68 @@ function autoMigrate(): void {
             KEY idx_ip (ipv4)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='安全事件日志'");
 
+        // payment_orders 支付订单（v1.8.1）
+        $db->exec("CREATE TABLE IF NOT EXISTS payment_orders (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            order_no VARCHAR(40) NOT NULL COMMENT '商户订单号',
+            student_id INT NOT NULL DEFAULT 0 COMMENT '花名册学生ID，0=不指定',
+            student_name VARCHAR(50) DEFAULT NULL,
+            round_id INT NOT NULL DEFAULT 0 COMMENT '缴费轮次(transactions.id)，0=通用',
+            amount DECIMAL(10,2) NOT NULL,
+            channel VARCHAR(20) DEFAULT NULL COMMENT 'alipay/wxpay/qqpay',
+            status VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT 'pending/paid/closed',
+            trade_no VARCHAR(64) DEFAULT NULL COMMENT '平台订单号',
+            settle_mode VARCHAR(10) NOT NULL DEFAULT 'auto' COMMENT 'auto/manual',
+            settled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已核销',
+            pay_url VARCHAR(1000) DEFAULT NULL,
+            notify_raw TEXT,
+            created_by INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            paid_at DATETIME DEFAULT NULL,
+            UNIQUE KEY uk_order_no (order_no),
+            KEY idx_status (status),
+            KEY idx_student (student_id),
+            KEY idx_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付订单'");
+
+        // payment_orders.channel_id（多通道）
+        try { $poCols = $db->query("SHOW COLUMNS FROM payment_orders")->fetchAll(PDO::FETCH_COLUMN); } catch (\Exception $e) { $poCols = []; }
+        if (!empty($poCols) && !in_array('channel_id', $poCols)) $db->exec("ALTER TABLE payment_orders ADD COLUMN channel_id VARCHAR(32) DEFAULT NULL COMMENT '支付通道ID' AFTER channel");
+
+        // fee_payments 在线缴费核销记录（v1.8.1）
+        $db->exec("CREATE TABLE IF NOT EXISTS fee_payments (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            order_no VARCHAR(40) NOT NULL,
+            student_id INT NOT NULL DEFAULT 0,
+            student_name VARCHAR(50) DEFAULT NULL,
+            round_id INT NOT NULL DEFAULT 0,
+            amount DECIMAL(10,2) NOT NULL,
+            channel VARCHAR(20) DEFAULT NULL,
+            trade_no VARCHAR(64) DEFAULT NULL,
+            tx_id INT DEFAULT NULL COMMENT '对应收支记录ID',
+            paid_at DATETIME DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_order_no (order_no),
+            KEY idx_student (student_id),
+            KEY idx_round (round_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='在线缴费核销记录'");
+
+        // 回填班费收缴轮次的「每人应缴」：优先取描述里的「每人X元」，其次 应收总额/非免缴人数，最后 金额/缴费人数
+        try {
+            $ppRows = $db->query("SELECT id, description, amount, expected_amount, payer_ids FROM transactions WHERE sub_category='班费收缴' AND per_person IS NULL")->fetchAll();
+            if ($ppRows) {
+                $eligible = (int)$db->query("SELECT COUNT(*) FROM class_roster WHERE exempt=0")->fetchColumn();
+                $ppUpd = $db->prepare("UPDATE transactions SET per_person=:p WHERE id=:id");
+                foreach ($ppRows as $r) {
+                    $pp = 0.0;
+                    if (preg_match('/每人\s*([0-9]+(?:\.[0-9]+)?)/u', (string)$r['description'], $m)) $pp = round((float)$m[1], 2);
+                    if ($pp <= 0) { $e = (float)$r['expected_amount']; if ($e > 0 && $eligible > 0) $pp = round($e / $eligible, 2); }
+                    if ($pp <= 0) { $pids = json_decode($r['payer_ids'] ?? '', true) ?: []; if (is_array($pids) && count($pids) > 0) $pp = round(((float)$r['amount']) / count($pids), 2); }
+                    if ($pp > 0) $ppUpd->execute([':p' => $pp, ':id' => $r['id']]);
+                }
+            }
+        } catch (\Exception $e) { error_log('[班费系统] 回填 per_person 失败: ' . $e->getMessage()); }
+
         // semesters 学期表
         $db->exec("CREATE TABLE IF NOT EXISTS semesters (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -252,7 +318,7 @@ define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
 // 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
 // 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
-define('SCHEMA_VERSION', '1.8');
+define('SCHEMA_VERSION', '1.11');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([
@@ -344,6 +410,118 @@ function setMeta(string $key, string $value): void {
     db()->prepare("INSERT INTO system_meta (meta_key, meta_value) VALUES (:k, :v)
         ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)")
         ->execute([':k' => $key, ':v' => $value]);
+}
+
+// ========== 支付通道配置（易支付/彩虹易支付，支持多通道） ==========
+/** 读取支付配置（pay_config.php，缺失则返回默认关闭配置） */
+function getPayConfig(bool $reload = false): array {
+    static $cfg = null;
+    if ($cfg !== null && !$reload) return $cfg;
+    $defaults = [
+        'enabled'      => false,
+        'channels'     => [],   // 多通道：[{id,name,gateway,pid,key,types[],enabled}]
+        'methods'      => [     // 支付方式定义（code 传给易支付的 type，label 仅展示）
+            ['code' => 'alipay', 'label' => '支付宝'],
+            ['code' => 'wxpay',  'label' => '微信支付'],
+            ['code' => 'qqpay',  'label' => 'QQ 钱包'],
+        ],
+        'gateway'      => '',   // 兼容旧版单通道
+        'pid'          => '',
+        'key'          => '',
+        'sign_type'    => 'MD5',
+        'default_type' => 'alipay',
+        'settle_mode'  => 'auto',
+        'notify_url'   => '',
+        'return_url'   => '',
+        'min_amount'   => 0.01,
+        'max_amount'   => 2000.00,
+        'sitename'     => SITE_NAME,
+    ];
+    $file = __DIR__ . '/pay_config.php';
+    $loaded = is_file($file) ? @include $file : null;
+    $cfg = is_array($loaded) ? array_merge($defaults, $loaded) : $defaults;
+    return $cfg;
+}
+
+/** 归一化支付方式定义（code=传给易支付的 type，label=展示名） */
+function payMethods(): array {
+    $c = getPayConfig();
+    $out = [];
+    if (!empty($c['methods']) && is_array($c['methods'])) {
+        foreach ($c['methods'] as $m) {
+            if (!is_array($m)) continue;
+            $code = preg_replace('/[^A-Za-z0-9_\-]/', '', (string)($m['code'] ?? ''));
+            if ($code === '') continue;
+            $label = mb_substr(trim((string)($m['label'] ?? '')), 0, 20) ?: $code;
+            $out[$code] = ['code' => $code, 'label' => $label];
+        }
+    }
+    if (empty($out)) {
+        $out = [
+            'alipay' => ['code' => 'alipay', 'label' => '支付宝'],
+            'wxpay'  => ['code' => 'wxpay',  'label' => '微信支付'],
+            'qqpay'  => ['code' => 'qqpay',  'label' => 'QQ 钱包'],
+        ];
+    }
+    return array_values($out);
+}
+
+/** 归一化支付通道列表（优先 channels[]，兼容旧版单通道配置） */
+function payChannels(): array {
+    $c = getPayConfig();
+    $out = [];
+    if (!empty($c['channels']) && is_array($c['channels'])) {
+        foreach ($c['channels'] as $i => $ch) {
+            if (!is_array($ch)) continue;
+            $allowed = array_column(payMethods(), 'code');
+            $types = array_values(array_intersect(array_map('strval', (array)($ch['types'] ?? [])), $allowed));
+            $out[] = [
+                'id'      => (string)($ch['id'] ?? ('ch' . ($i + 1))),
+                'name'    => (string)($ch['name'] ?? ('通道' . ($i + 1))),
+                'gateway' => rtrim((string)($ch['gateway'] ?? ''), '/'),
+                'pid'     => (string)($ch['pid'] ?? ''),
+                'key'     => (string)($ch['key'] ?? ''),
+                'types'   => $types,
+                'enabled' => !empty($ch['enabled']),
+            ];
+        }
+    }
+    if (empty($out) && $c['gateway'] !== '' && $c['pid'] !== '' && $c['key'] !== '') {
+        $out[] = [
+            'id' => 'default', 'name' => '默认通道',
+            'gateway' => rtrim((string)$c['gateway'], '/'), 'pid' => (string)$c['pid'], 'key' => (string)$c['key'],
+            'types' => ['alipay', 'wxpay', 'qqpay'], 'enabled' => true,
+        ];
+    }
+    return $out;
+}
+
+/** 可用支付方式（所有已启用且配置完整的通道支持类型的并集） */
+function payAvailableTypes(): array {
+    $types = [];
+    foreach (payChannels() as $ch) {
+        if (!$ch['enabled'] || $ch['gateway'] === '' || $ch['pid'] === '' || $ch['key'] === '') continue;
+        foreach ($ch['types'] as $t) if (!in_array($t, $types, true)) $types[] = $t;
+    }
+    return $types;
+}
+
+/** 按支付方式选择可用通道（可指定 channel_id） */
+function payPickChannel(string $type, string $channelId = ''): ?array {
+    $fallback = null;
+    foreach (payChannels() as $ch) {
+        if (!$ch['enabled'] || $ch['gateway'] === '' || $ch['pid'] === '' || $ch['key'] === '') continue;
+        if (!in_array($type, $ch['types'], true)) continue;
+        if ($channelId !== '' && $ch['id'] === $channelId) return $ch;
+        if ($fallback === null) $fallback = $ch;
+    }
+    return $fallback;
+}
+
+/** 支付通道是否已正确配置并开启 */
+function payConfigured(): bool {
+    $c = getPayConfig();
+    return !empty($c['enabled']) && count(payAvailableTypes()) > 0;
 }
 
 // ========== 会话管理 ==========
