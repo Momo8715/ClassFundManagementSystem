@@ -75,10 +75,15 @@ jobs:
             echo "### 更新内容"
             echo ""
             if [ -n "$PREV" ] && git rev-parse -q --verify "$PREV" >/dev/null 2>&1; then
-              git log --oneline --no-decorate "$PREV..HEAD" | sed 's/^/- /'
+              # 过滤自动同步 version.json 的提交，只保留真正的改动
+              git log --oneline --no-decorate "$PREV..HEAD" | grep -v -E 'chore: 更新 version.json' | sed 's/^/- /'
+              echo ""
+              echo "**完整对比**：https://github.com/${{ github.repository }}/compare/${PREV}...${{ steps.meta.outputs.tag }}"
             else
               echo "- 初始发布"
             fi
+            echo ""
+            echo "> 📦 后台「配置管理 → 远程升级」可一键更新，升级前自动备份。"
           } > /tmp/release_notes.md
           echo "--- Release 说明 ---"
           cat /tmp/release_notes.md
