@@ -29,9 +29,24 @@ function upgradeHttpGet(string $url, int $timeout = 10): ?string {
     return ($data === false || $data === '') ? null : $data;
 }
 
-/** 获取远端 version.json（代理优先，直连兜底） */
+/** 获取远端 version.json：优先 GitHub Contents API（国内可直连、不受代理/CDN 缓存影响），raw 兜底 */
 function fetchRemoteVersion(): ?array {
-    $raw = 'https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json';
+    $api = 'https://api.github.com/repos/Momo8715/ClassFundManagementSystem/contents/version.json?ref=main&t=' . time();
+    $ctx = stream_context_create(['http' => [
+        'timeout'         => 10,
+        'header'          => "Accept: application/vnd.github.raw
+User-Agent: ClassFund-Updater/1.0
+Cache-Control: no-cache
+",
+        'follow_location' => 1,
+    ]]);
+    $txt = @file_get_contents($api, false, $ctx);
+    if (is_string($txt) && $txt !== '') {
+        $d = json_decode($txt, true);
+        if (is_array($d) && !empty($d['version'])) return $d;
+    }
+    // 兜底：raw.githubusercontent（代理优先，直连兜底）
+    $raw = 'https://raw.githubusercontent.com/Momo8715/ClassFundManagementSystem/main/version.json?t=' . time();
     foreach (array_unique([githubProxy($raw), $raw]) as $u) {
         $json = upgradeHttpGet($u, 10);
         if ($json !== null) {

@@ -35,7 +35,8 @@ jobs:
               data = json.load(f)
           data['version'] = version
           data['notes'] = '自动发布 ' + tag
-          data['url'] = 'https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip'
+          # 用带 tag 的固定地址：/releases/latest/... 不随版本变化，容易被代理/CDN 缓存住旧包
+          data['url'] = 'https://github.com/Momo8715/ClassFundManagementSystem/releases/download/' + tag + '/update.zip'
           data.pop('sha256', None)  # 包内不放 sha256（由远端 version.json 提供），避免包内旧值造成误导
           with open('version.json', 'w', encoding='utf-8') as f:
               json.dump(data, f, ensure_ascii=False)
