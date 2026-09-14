@@ -26,7 +26,16 @@ if ($loggedIn) {
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
 } else {
-    header('Cache-Control: public, max-age=7200, s-maxage=43200');
+    // ⚠️ Fuxsto（cdn-clever-*.fuxsto.gay）的共享缓存会跨域名串号：
+    // 本站页面一旦被它缓存，就会污染同一节点上 pay.hw / yzf.pay.hw 的首页（/），
+    // 导致学生打开支付页时看到本站的「未登录」页面。故经由 Fuxsto 的请求一律不缓存。
+    $cfHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    if (strpos($cfHost, 'fuxcdn') !== false || strpos($cfHost, 'fuxsto') !== false) {
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+    } else {
+        header('Cache-Control: public, max-age=7200, s-maxage=43200');
+    }
 }
 
 // 确保 CSRF token 已生成（兼容旧 session）
@@ -112,7 +121,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     </script>
     <!-- 预加载关键资源：提前建立连接/加载JS，减少等待 -->
     <link rel="preload" href="assets/css/style.css?v=17" as="style">
-    <link rel="preload" href="assets/js/app.js?v=38" as="script">
+    <link rel="preload" href="assets/js/app.js?v=39" as="script">
     <link rel="preconnect" href="/" crossorigin>
     <script data-cfasync="false">
     // 防止 app.js 未就绪时点击登录报错：按钮先禁用，JS 加载后启用
@@ -208,6 +217,11 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                 <?php if (hasPermission('viewSecurity')): ?>
                 <button data-page="security" onclick="switchPage('security')" id="navSecurity">
                     <span class="icon">🛡️</span> 安全分析
+                </button>
+                <?php endif; ?>
+                <?php if (hasPermission('viewSecurity')): ?>
+                <button data-page="config" onclick="switchPage('config')" id="navConfig">
+                    <span class="icon">⚙️</span> 配置管理
                 </button>
                 <?php endif; ?>
                 <button data-page="recycle" onclick="switchPage('recycle')" id="navRecycle">
@@ -416,6 +430,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <button class="btn btn-outline btn-sm" data-tabbtn="roster" onclick="window._tab('payTabs','roster')">📋 名册缴费</button>
                     <button class="btn btn-outline btn-sm" data-tabbtn="rounds" onclick="window._tab('payTabs','rounds')">📅 轮次明细</button>
                     <button class="btn btn-outline btn-sm" data-tabbtn="orders" onclick="window._tab('payTabs','orders')">📦 支付订单</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="reminder" onclick="window._tab('payTabs','reminder');window._payReminderLoad&&window._payReminderLoad()">📣 催缴通知</button>
                 </div>
                 <div id="payTabs">
                     <div class="tab-pane" data-pane="summary">
@@ -453,6 +468,23 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                             <span id="payOrderSummary" style="font-size:12px;color:var(--text-secondary)"></span>
                         </div>
                         <div class="table-wrap" id="payOrdersTable"></div>
+                    </div>
+                    <div class="tab-pane" data-pane="reminder" style="display:none">
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+                            <button class="btn btn-primary btn-sm" onclick="window._payReminderLoad()">🔄 生成催缴名单</button>
+                            <button class="btn btn-outline btn-sm" onclick="window._payReminderCopyAll(this)">📋 复制全班文案</button>
+                            <button class="btn btn-success btn-sm" onclick="window._payReminderPush(this)">📣 推送到群机器人</button>
+                            <span id="payReminderSummary" style="font-size:12px;color:var(--text-secondary)"></span>
+                        </div>
+                        <div class="table-wrap" id="payReminderTable"><div class="empty" style="padding:20px">点击「生成催缴名单」查看未缴学生（口径：各轮「每人应缴」相加 − 已缴）</div></div>
+                        <div style="margin-top:16px;background:var(--bg-card);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);max-width:900px">
+                            <h4 style="font-size:13px;margin-bottom:8px;color:var(--primary)">📨 自定义消息推送</h4>
+                            <textarea id="payReminderMsg" rows="3" maxlength="1000" placeholder="输入要发送到群里的内容（通知 / 公告 / 提醒），最多 1000 字" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);resize:vertical"></textarea>
+                            <div style="margin-top:8px">
+                                <button class="btn btn-primary btn-sm" onclick="window._payReminderPushText(this)">📨 发送到群</button>
+                                <span style="font-size:11px;color:var(--text-secondary);margin-left:8px">发送到当前配置的群机器人（企业微信 / 飞书 / 钉钉 / QQ / 自定义）</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -494,7 +526,6 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <button class="btn btn-outline btn-sm" data-sectab="login" onclick="window._secTab('login')">🔍 登录分析</button>
                     <button class="btn btn-outline btn-sm" data-sectab="detail" onclick="window._secTab('detail')">📋 明细与事件</button>
                     <button class="btn btn-outline btn-sm" data-sectab="manage" onclick="window._secTab('manage')">⛔ IP与账号</button>
-                    <button class="btn btn-outline btn-sm" data-sectab="system" onclick="window._secTab('system')">⚙️ 系统设置</button>
                 </div>
 
                 <!-- 控制栏（筛选，随页签显隐） -->
@@ -572,8 +603,22 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <div class="table-wrap" id="bannedUsersTable"></div>
                 </div>
 
-                <!-- 页签：系统设置 -->
-                <div class="sec-pane" data-pane="system" style="display:none">
+
+            </div>
+
+            <?php endif; ?>
+
+            <!-- 配置管理（仅管理员可查看） -->
+            <?php if (hasPermission('viewSecurity')): ?>
+            <div class="page" id="page-config">
+                <div class="section-header"><h3>⚙️ 配置管理</h3></div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px" data-tabscope="cfgTabs">
+                    <button class="btn btn-primary btn-sm" data-tabbtn="pay" onclick="window._tab('cfgTabs','pay')">💳 支付通道</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="robot" onclick="window._tab('cfgTabs','robot')">📣 群机器人</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="upgrade" onclick="window._tab('cfgTabs','upgrade')">🔄 远程升级</button>
+                </div>
+                <div id="cfgTabs">
+                    <div class="tab-pane" data-pane="pay">
                     <h4 style="margin-bottom:8px;color:var(--primary)">⚙️ 支付通道设置（易支付 · 支持多通道）</h4>
                     <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);max-width:900px">
                         <div id="payCfgStatus" style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">加载中…</div>
@@ -623,17 +668,130 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                             <span style="font-size:11px;color:var(--text-secondary);margin-left:8px">密钥保存后仅显示后 4 位，不再回显</span>
                         </div>
                     </div>
+                    </div>
+                    <div class="tab-pane" data-pane="robot" style="display:none">
+                        <div id="payReminderCfg" style="margin-top:16px;background:var(--bg-card);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);max-width:900px">
+                            <h4 style="font-size:13px;margin-bottom:8px;color:var(--primary)">⚙️ 群机器人推送设置（企业微信 / 飞书 / 钉钉 / QQ / 自定义）</h4>
+                            <div style="display:grid;grid-template-columns:110px 1fr;gap:8px 10px;align-items:center;max-width:680px">
+                                <label style="font-size:13px">机器人类型</label>
+                                <select id="remCfgType" onchange="window._payReminderCfgToggle&&window._payReminderCfgToggle()" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
+                                    <option value="wecom">企业微信机器人</option>
+                                    <option value="feishu">飞书机器人</option>
+                                    <option value="dingtalk">钉钉机器人</option>
+                                    <option value="qq">QQ 官方机器人</option>
+                                    <option value="custom">自定义（POST JSON）</option>
+                                </select>
+                                <label id="remCfgWebhookLabel" style="font-size:13px">Webhook</label>
+                                <input type="password" id="remCfgWebhook" autocomplete="new-password" placeholder="https://..." style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
+                                <label style="font-size:13px">启用</label>
+                                <label style="font-size:13px"><input type="checkbox" id="remCfgEnabled"> 启用推送</label>
+                            </div>
 
+                            <!-- QQ 机器人专属设置（选「QQ 官方机器人」时显示） -->
+                            <div id="remCfgQqBox" style="display:none;margin-top:14px">
+                                <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+                                    <b style="font-size:13px;color:var(--primary)">🤖 QQ 机器人基础</b>
+                                    <div style="display:grid;grid-template-columns:110px 1fr;gap:8px 10px;align-items:center;max-width:680px;margin-top:8px">
+                                        <label style="font-size:13px">AppID</label>
+                                        <input type="text" id="remCfgQqAppid" placeholder="QQ 开放平台 BotAppID" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
+                                        <label style="font-size:13px">AppSecret</label>
+                                        <input type="password" id="remCfgQqSecret" autocomplete="new-password" placeholder="留空不修改" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
+                                        <label style="font-size:13px">沙箱</label>
+                                        <label style="font-size:13px"><input type="checkbox" id="remCfgQqSandbox"> 使用沙箱环境（sandbox.api.sgroup.qq.com）</label>
+                                        <label style="font-size:13px">单聊</label>
+                                        <label style="font-size:13px"><input type="checkbox" id="remCfgQqC2cOpen"> 单聊不限制用户（关闭后仅下方名单内的 openid 可用）</label>
+                                    </div>
+                                    <div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                        <b style="font-size:12px">网关连接</b>
+                                        <span id="remCfgGateway" style="font-size:12px;color:var(--text-secondary)">—</span>
+                                    </div>
+                                    <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">QQ 官方要求机器人保持 WebSocket 网关在线才能收发消息。本系统已内置网关客户端：保存 AppID/AppSecret 后会自动启动并连接（<b>无需额外安装</b>）；服务器需有 Node.js 18+。</div>
+                                </div>
+
+                                <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+                                    <b style="font-size:13px;color:var(--primary)">🎯 推送目标</b>
+                                    <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">可添加多个方向：QQ用户（单聊 <code>openid</code>）/ QQ群（<code>group_openid</code>）/ 频道（<code>channel_id</code>）。</div>
+                                    <div id="remCfgQqTargets" style="display:flex;flex-direction:column;gap:8px"></div>
+                                    <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px" onclick="window._payReminderCfgAddTarget&&window._payReminderCfgAddTarget()">➕ 添加目标</button>
+                                </div>
+
+                                <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+                                    <b style="font-size:13px;color:var(--primary)">🔗 Webhook 回调地址</b>
+                                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+                                        <code id="remCfgQqCallback" style="font-size:12px;word-break:break-all;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text)">-</code>
+                                        <button type="button" class="btn btn-outline btn-sm" onclick="window._payReminderCopyText&&window._payReminderCopyText('remCfgQqCallback',this)">📋 复制</button>
+                                    </div>
+                                    <div style="font-size:11px;color:var(--text-secondary);margin-top:6px">把它填到 QQ 开放平台机器人的「Webhook 回调」；回调校验与事件验签均为 Ed25519。</div>
+                                    <div style="margin-top:12px;border-top:1px dashed var(--border);padding-top:10px">
+                                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                            <b style="font-size:12px">QQ 回调协议监测</b>
+                                            <button type="button" class="btn btn-outline btn-sm" onclick="window._payReminderCfgLoad&&window._payReminderCfgLoad()">🔄 刷新</button>
+                                            <span style="font-size:11px;color:var(--text-secondary)">⚠️ 先保存 AppID / AppSecret，再去 QQ 开放平台点「校验」，这里会显示平台的每一次回调</span>
+                                        </div>
+                                        <div class="table-wrap" id="remCfgWebhookLog" style="margin-top:6px"><div class="empty" style="padding:12px">暂无回调记录</div></div>
+                                    </div>
+                                </div>
+
+                                <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+                                    <b style="font-size:13px;color:var(--primary)">🧭 指令面板与自定义菜单</b>
+                                    <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">勾选启用的指令；停用的指令机器人不响应，也不会出现在菜单里。</div>
+                                    <div id="remCfgQqCmdList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px 16px"></div>
+                                    <div style="display:grid;grid-template-columns:90px 1fr;gap:8px 10px;align-items:center;max-width:680px;margin-top:14px">
+                                        <label style="font-size:12px">菜单标题</label>
+                                        <input type="text" id="remCfgMenuIntro" maxlength="120" placeholder="【班费机器人 · 功能菜单】" style="padding:6px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
+                                        <label style="font-size:12px">菜单底部</label>
+                                        <input type="text" id="remCfgMenuFooter" maxlength="200" placeholder="示例：@机器人 查班费" style="padding:6px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
+                                    </div>
+                                    <div style="margin-top:14px">
+                                        <b style="font-size:12px">自定义关键词回复</b>
+                                        <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">用户消息包含关键词时，机器人回复对应内容（最多 20 条）。</div>
+                                        <div id="remCfgCustomReplies" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
+                                        <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px" onclick="window._payReminderCfgAddReply&&window._payReminderCfgAddReply()">➕ 添加关键词</button>
+                                    </div>
+                                    <div style="margin-top:14px">
+                                        <b style="font-size:12px">菜单预览</b>
+                                        <pre id="remCfgMenuPreview" style="margin-top:6px;white-space:pre-wrap;font-size:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:10px;color:var(--text);max-height:260px;overflow:auto">-</pre>
+                                    </div>
+                                </div>
+
+                                <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+                                    <b style="font-size:13px;color:var(--primary)">🛡️ 管理员绑定</b>
+                                    <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">
+                                        生成 6 位绑定码后，管理员在 QQ 里给机器人发送「<b>绑定管理员 验证码</b>」，即可使用
+                                        <b>未缴名单 / 催缴 / 私信催缴 / 发通知</b> 等管理指令（10 分钟内有效、一次性）。
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                                        <button type="button" class="btn btn-outline btn-sm" onclick="window._qqAdminCode&&window._qqAdminCode()">🎫 生成管理员绑定码</button>
+                                        <code id="remCfgAdminCode" style="font-size:20px;letter-spacing:4px;font-weight:700;color:var(--primary)">-</code>
+                                        <span id="remCfgAdminCodeHint" style="font-size:11px;color:var(--text-secondary)"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="margin-top:10px">
+                                <button class="btn btn-primary btn-sm" onclick="window._payReminderCfgSave()">💾 保存推送设置</button>
+                                <span style="font-size:11px;color:var(--text-secondary);margin-left:8px">密钥仅存本地数据库，保存后不明文回显</span>
+                            </div>
+                            <div id="remCfgCurrentHelp" style="margin-top:10px;font-size:12px;color:var(--primary);line-height:1.8"></div>
+                            <div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px;font-size:12px;color:var(--text-secondary);line-height:2">
+                                <b style="color:var(--text)">各机器人获取地址：</b><br>
+                                · <b>企业微信</b>：群设置 → 群机器人 → 添加 → 复制 Webhook　<a href="https://developer.work.weixin.qq.com/document/path/91770" target="_blank" rel="noopener">官方文档</a><br>
+                                · <b>飞书</b>：群设置 → 群机器人 → 添加自定义机器人 → 复制 Webhook　<a href="https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot" target="_blank" rel="noopener">官方文档</a><br>
+                                · <b>钉钉</b>：群设置 → 智能群助手 → 添加机器人 → 自定义 → Webhook　<a href="https://open.dingtalk.com/document/orgapp/custom-robot-access" target="_blank" rel="noopener">官方文档</a><br>
+                                · <b>QQ 官方机器人</b>：<a href="https://q.qq.com" target="_blank" rel="noopener">QQ 开放平台</a> → 创建机器人 → 开发设置 获取 <b>AppID / AppSecret</b>；Webhook 回调填 <code>https://你的域名/api.php?action=qq_webhook</code>（<a href="https://bot.qq.com/wiki/" target="_blank" rel="noopener">官方文档</a>）<br>
+                                · <b>自定义</b>：填写任意可接收 <code>POST JSON</code> 的 https 地址
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tab-pane" data-pane="upgrade" style="display:none">
                     <h4 style="margin:16px 0 8px;color:var(--primary)">🔄 远程升级</h4>
                     <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);margin-bottom:8px">
                         <button class="btn btn-primary btn-sm" onclick="checkUpdate()">🔍 检查更新</button>
                         <button class="btn btn-success btn-sm" onclick="doUpgrade()" style="margin-left:8px;display:none" id="btnUpgrade">🚀 立即升级</button>
                         <span id="upgradeStatus" style="margin-left:12px;font-size:13px"></span>
                     </div>
+                    </div>
                 </div>
-
             </div>
-
             <?php endif; ?>
             <!-- 回收站 -->
             <div class="page" id="page-recycle">
@@ -768,13 +926,13 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=38" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=38')"></script>
+    <script src="assets/js/app.js?v=39" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=39')"></script>
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
-    <script src="assets/js/security.js?v=4" defer data-cfasync="false"></script>
+    <script src="assets/js/security.js?v=5" defer data-cfasync="false"></script>
     <!-- 在线支付面板（v1.8.1） -->
-    <script src="assets/js/pay.js?v=9" defer data-cfasync="false"></script>
+    <script src="assets/js/pay.js?v=23" defer data-cfasync="false"></script>
     <!-- 通用二级分类页签（多分栏页面） -->
-    <script src="assets/js/tabs.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/tabs.js?v=2" defer data-cfasync="false"></script>
     <!-- 收支弹窗「班费收缴」简化模式 -->
     <script src="assets/js/modal-tx.js?v=1" defer data-cfasync="false"></script>
 

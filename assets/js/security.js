@@ -70,6 +70,7 @@
 
   // 二级分类（页签）切换：只显示当前分组，避免长页面滚动
   window._secTab = function (name) {
+    if (name === 'system') name = 'overview'; // 系统设置已迁移到「配置管理」
     try { localStorage.setItem('secTab', name); } catch (e) { /* 隐私模式忽略 */ }
     var panes = document.querySelectorAll('#page-security .sec-pane');
     for (var i = 0; i < panes.length; i++) {
@@ -81,7 +82,7 @@
       tabs[j].className = on ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
     }
     var f = document.getElementById('secFilters');
-    if (f) f.style.display = (name === 'manage' || name === 'system') ? 'none' : '';
+    if (f) f.style.display = (name === 'manage') ? 'none' : '';
   };
 
   // app.js renderSecurity 渲染完成后回调
@@ -234,8 +235,6 @@
         '<button class="btn btn-outline btn-sm" ' + (pg >= tp ? 'disabled' : '') + ' onclick="window._secReload(' + (pg + 1) + ')">下一页 ›</button>'
       : (d.detail_total ? '<span style="font-size:12px;color:var(--text-secondary)">共 ' + d.detail_total + ' 条</span>' : ''));
 
-    // 支付通道设置（管理界面，pay.js 提供）
-    if (window._paySettingsLoad) { try { window._paySettingsLoad(); } catch (e) {} }
 
     // 恢复上次查看的二级分类页签
     var tab = 'overview';

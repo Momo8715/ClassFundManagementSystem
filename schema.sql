@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS `semesters` (
 -- 系统元数据（key-value，用于记录 schema 版本，跳过重复迁移）
 CREATE TABLE IF NOT EXISTS `system_meta` (
   `meta_key`   VARCHAR(50) PRIMARY KEY,
-  `meta_value` VARCHAR(255) NOT NULL
+  `meta_value` TEXT NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统元数据';
 
 -- 凭证图片库（v1.5.6：原图+缩略图二进制存数据库，列表优先加载缩略图）
@@ -145,3 +145,19 @@ CREATE TABLE IF NOT EXISTS `security_events` (
   KEY `idx_event` (`event`),
   KEY `idx_ip` (`ipv4`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='安全事件日志';
+
+-- QQ 官方机器人绑定（openid -> 学生，用于 @机器人 查询个人班费）
+CREATE TABLE IF NOT EXISTS `qq_bindings` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `bind_key`   VARCHAR(191) NOT NULL COMMENT 'group:<group_openid>:<member_openid> / c2c:<openid> / channel:<channel_id>:<user_id>',
+  `student_id` INT NOT NULL DEFAULT 0,
+  `role`       VARCHAR(20) NOT NULL DEFAULT 'student' COMMENT 'student=学生 / admin=管理员',
+  `user_id`    INT NOT NULL DEFAULT 0 COMMENT '管理员对应的系统用户ID',
+  `scope`      VARCHAR(20) NOT NULL DEFAULT '' COMMENT 'group/c2c/channel',
+  `target`     VARCHAR(191) NOT NULL DEFAULT '' COMMENT '群 openid / 频道 id',
+  `openid`     VARCHAR(191) NOT NULL DEFAULT '' COMMENT '成员/用户 openid',
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_bind_key` (`bind_key`),
+  KEY `idx_student` (`student_id`),
+  KEY `idx_role` (`role`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='QQ机器人绑定';

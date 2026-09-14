@@ -27,6 +27,6 @@
     if (t) window._tab(scopeId, t);
   };
   document.addEventListener('DOMContentLoaded', function () {
-    ['dashTabs', 'reportTabs', 'rosterTabs', 'payTabs'].forEach(function (s) { window._tabRestore(s, ''); });
+    ['dashTabs', 'reportTabs', 'rosterTabs', 'payTabs', 'cfgTabs'].forEach(function (s) { window._tabRestore(s, ''); });
   });
 })();

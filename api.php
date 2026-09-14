@@ -25,7 +25,7 @@ if (!isDbInstalled()) {
 autoMigrate();
 
 // IP 黑名单拦截（命中则直接 403；支付回调/同步返回由支付平台服务器发起，需放行）
-if (!in_array($_GET['action'] ?? '', ['pay_notify', 'pay_return'], true)) {
+if (!in_array($_GET['action'] ?? '', ['pay_notify', 'pay_return', 'qq_webhook'], true)) {
     requireNotBlockedIp();
 }
 
@@ -69,6 +69,13 @@ $actionMethods = [
     'pay_create' => ['POST'],
     'pay_config_get' => ['GET'],
     'pay_config_save' => ['POST'],
+    'pay_reminders' => ['GET'],
+    'pay_reminder_cfg_get' => ['GET'],
+    'pay_reminder_cfg_save' => ['POST'],
+    'pay_reminder_send' => ['POST'],
+    'pay_reminder_push_text' => ['POST'],
+    'qq_webhook' => ['POST'],
+    'qq_admin_code' => ['POST'],
     'pay_notify' => ['GET', 'POST'],
     'pay_return' => ['GET'],
     'pay_orders' => ['GET'],
@@ -227,6 +234,29 @@ switch ($action) {
         break;
     case 'pay_config_save':
         handlePayConfigSave();
+        break;
+
+    // ========== 催缴通知 ==========
+    case 'pay_reminders':
+        handlePayReminders();
+        break;
+    case 'pay_reminder_cfg_get':
+        handlePayReminderCfgGet();
+        break;
+    case 'pay_reminder_cfg_save':
+        handlePayReminderCfgSave();
+        break;
+    case 'pay_reminder_send':
+        handlePayReminderSend();
+        break;
+    case 'pay_reminder_push_text':
+        handlePayReminderPushText();
+        break;
+    case 'qq_webhook':
+        handleQqWebhook();
+        break;
+    case 'qq_admin_code':
+        handleQqAdminCode();
         break;
 
     // ========== 远程升级 ==========

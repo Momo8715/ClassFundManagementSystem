@@ -5,6 +5,13 @@
  * 高级用户：也可直接修改下方常量或创建 db_config.json
  */
 
+// 生产环境：PHP 错误只写日志，绝不输出到响应体。
+// 否则一条警告就会「提前发送响应头」，导致其后 session_set_cookie_params()/session_start() 失败，
+// 进而丢失登录态与 CSRF token（表现为页面顶部出现 Warning 文字、刷新后消失、支付等操作异常）。
+@ini_set('display_errors', '0');
+@ini_set('log_errors', '1');
+@error_reporting(E_ALL);
+
 // 加载工具函数库
 require_once __DIR__ . '/src/helpers.php';
 
@@ -65,10 +72,21 @@ function autoMigrate(): void {
         // ---- schema 版本检查：已是最新则跳过，避免每次请求执行十几条 SHOW COLUMNS/ALTER ----
         $db->exec("CREATE TABLE IF NOT EXISTS system_meta (
             meta_key VARCHAR(50) PRIMARY KEY,
-            meta_value VARCHAR(255) NOT NULL
+            meta_value TEXT NOT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统元数据(key-value)'");
         $currentVersion = $db->query("SELECT meta_value FROM system_meta WHERE meta_key='schema_version'")->fetchColumn();
         if ($currentVersion === SCHEMA_VERSION) return;
+
+        // system_meta.meta_value 扩容为 TEXT（v1.14）：Webhook 地址 / 回调日志 / 自定义回复等可能较长，
+        // 旧版 VARCHAR(1024) 会在内容超长时让 setMeta 抛异常，导致写入静默失败
+        try {
+            $col = $db->query("SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='system_meta' AND COLUMN_NAME='meta_value'")->fetch(PDO::FETCH_ASSOC);
+            $dt = strtolower((string)($col['DATA_TYPE'] ?? ''));
+            if ($col && !in_array($dt, ['text', 'mediumtext', 'longtext'], true) && (int)($col['CHARACTER_MAXIMUM_LENGTH'] ?? 0) < 8192) {
+                $db->exec("ALTER TABLE system_meta MODIFY COLUMN meta_value TEXT NOT NULL");
+            }
+        } catch (\Exception $e) { /* 忽略，保持原长度 */ }
 
         // transactions 表新增字段检测
         try {
@@ -305,6 +323,32 @@ function autoMigrate(): void {
             UNIQUE KEY uk_name (name)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学期管理'");
 
+        // QQ 官方机器人绑定（openid -> 学生），用于 @机器人 查班费
+        $db->exec("CREATE TABLE IF NOT EXISTS qq_bindings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            bind_key VARCHAR(191) NOT NULL COMMENT 'group:<group_openid>:<member_openid> / c2c:<openid> / channel:<channel_id>:<user_id>',
+            student_id INT NOT NULL DEFAULT 0,
+            role VARCHAR(20) NOT NULL DEFAULT 'student' COMMENT 'student=学生 / admin=管理员',
+            user_id INT NOT NULL DEFAULT 0 COMMENT '管理员绑定时对应的系统用户ID',
+            scope VARCHAR(20) NOT NULL DEFAULT '' COMMENT '绑定来源：group/c2c/channel',
+            target VARCHAR(191) NOT NULL DEFAULT '' COMMENT '群 openid / 频道 id',
+            openid VARCHAR(191) NOT NULL DEFAULT '' COMMENT '成员/用户 openid',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_bind_key (bind_key),
+            KEY idx_student (student_id),
+            KEY idx_role (role)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='QQ机器人绑定'");
+
+        // qq_bindings 升级：管理员绑定与来源信息（v1.15）
+        try {
+            $qbCols = $db->query("SHOW COLUMNS FROM qq_bindings")->fetchAll(PDO::FETCH_COLUMN);
+            if (!in_array('role', $qbCols))    $db->exec("ALTER TABLE qq_bindings ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student' COMMENT 'student/admin' AFTER student_id");
+            if (!in_array('user_id', $qbCols)) $db->exec("ALTER TABLE qq_bindings ADD COLUMN user_id INT NOT NULL DEFAULT 0 COMMENT '管理员系统用户ID' AFTER role");
+            if (!in_array('scope', $qbCols))   $db->exec("ALTER TABLE qq_bindings ADD COLUMN scope VARCHAR(20) NOT NULL DEFAULT '' AFTER user_id");
+            if (!in_array('target', $qbCols))  $db->exec("ALTER TABLE qq_bindings ADD COLUMN target VARCHAR(191) NOT NULL DEFAULT '' AFTER scope");
+            if (!in_array('openid', $qbCols))  $db->exec("ALTER TABLE qq_bindings ADD COLUMN openid VARCHAR(191) NOT NULL DEFAULT '' AFTER target");
+        } catch (\Exception $e) { /* 忽略 */ }
+
         // ---- 全部迁移完成，记录版本号（异常时不会执行到这里，下次请求会重试） ----
         $db->exec("INSERT INTO system_meta (meta_key, meta_value) VALUES ('schema_version', '" . SCHEMA_VERSION . "')
             ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)");
@@ -318,7 +362,7 @@ define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
 // 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
 // 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
-define('SCHEMA_VERSION', '1.11');
+define('SCHEMA_VERSION', '1.15');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([
@@ -556,8 +600,18 @@ function payConfigured(): bool {
 }
 
 // ========== 会话管理 ==========
+/** 是否值得启动会话：已激活，或请求携带了会话 Cookie。
+ *  未登录访客（无 Cookie）不启动会话，既能让登录页继续被 CDN 缓存，
+ *  也避免在页面已输出后启动会话失败而抛 Warning。 */
+function sessionMayStart(): bool {
+    if (session_status() === PHP_SESSION_ACTIVE) return true;
+    return !empty($_COOKIE[session_name()]);
+}
+
 function startSession() {
     if (session_status() === PHP_SESSION_NONE) {
+        // 已有输出时无法再发送会话 Cookie，静默跳过而不是产生警告污染页面
+        if (headers_sent()) return;
         session_set_cookie_params([
             'lifetime' => SESSION_TIMEOUT,
             'path'     => '/',
@@ -585,11 +639,13 @@ function regenerateSession(): void {
 }
 
 function isLoggedIn(): bool {
+    if (!sessionMayStart()) return false;
     startSession();
     return isset($_SESSION['user_id']);
 }
 
 function currentUser(): ?array {
+    if (!sessionMayStart()) return null;
     startSession();
     if (!isset($_SESSION['user_id'])) return null;
     $roles = $_SESSION['roles'] ?? [];

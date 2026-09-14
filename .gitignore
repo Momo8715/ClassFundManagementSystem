@@ -42,3 +42,6 @@ _emoji_test.txt
 
 # 工作区 Agent Notes（仅本地，不发布到公开仓库）
 .agents/
+
+# QQ 网关客户端安装目录标记（由 tools/qqgw/install.sh 生成，含本机路径）
+.qqgw_dir
