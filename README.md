@@ -6,7 +6,7 @@
 
 > 上传即用 · 无需命令行 · 宝塔面板友好 · 支持远程一键升级
 
-[![版本](https://img.shields.io/badge/版本-v1.11.0-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
+[![版本](https://img.shields.io/badge/版本-v1.11.1-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
 [![PHP](https://img.shields.io/badge/PHP-8.0%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net)
 [![MySQL](https://img.shields.io/badge/MySQL-5.7%2B-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com)
 [![Status](https://img.shields.io/badge/状态-稳定-22c55e?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem)
@@ -365,6 +365,7 @@ GitHub Release → 下载 ZIP → 全站自动备份 → 解压覆盖 → 完成
 
 | 版本 | 说明 |
 |:---:|------|
+| **v1.11.1** | 🐛 修复远程升级后仍提示「发现新版本」：升级完成后以远端版本号为准回写；升级包内不再携带过期 sha256；升级后自动重新检查 |
 | **v1.11.0** | ✨ 在线支付（易支付 / 多通道）+ 催缴通知 + 自定义消息推送 + QQ 官方机器人互动查询 / 管理员指令 · ⚙️ 配置管理 · 🛡️ 会话与安全加固 |
 | **v1.10.1** | 🐛 在线缴费核销并入对应班费轮次，不再单独生成账目 |
 | **v1.10.0** | ✨ 多支付通道（易支付 / V免签）· 修复易支付 clientip 缺失 |

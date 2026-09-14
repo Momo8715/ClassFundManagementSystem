@@ -36,6 +36,7 @@ jobs:
           data['version'] = version
           data['notes'] = '自动发布 ' + tag
           data['url'] = 'https://github.com/Momo8715/ClassFundManagementSystem/releases/latest/download/update.zip'
+          data.pop('sha256', None)  # 包内不放 sha256（由远端 version.json 提供），避免包内旧值造成误导
           with open('version.json', 'w', encoding='utf-8') as f:
               json.dump(data, f, ensure_ascii=False)
           EOF

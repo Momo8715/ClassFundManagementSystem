@@ -289,6 +289,16 @@ function doUpgrade() {
     $zip->close();
     unlink($tmpZip);
 
+    // 以远端 version.json 为准写回本地：升级包内的版本信息可能滞后（CI 先打包、后回写 main），
+    // 若不覆盖，升级完成后仍会提示「发现新版本」。
+    $finalVersion = [
+        'version' => (string)$remote['version'],
+        'notes'   => (string)($remote['notes'] ?? ''),
+        'url'     => (string)($remote['url'] ?? ''),
+        'sha256'  => (string)($remote['sha256'] ?? ''),
+    ];
+    @file_put_contents(__DIR__ . '/../version.json', json_encode($finalVersion, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
     $user = currentUser();
     addLog($user['id'], $user['username'], 'upgrade', 'system', null, [
         'from' => $currentVersion,
