@@ -1387,7 +1387,8 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
     }
 
     // 绑定
-    if (qqCmdOn($c, 'bind') && preg_match('/^(?:绑定|bind)[\s:：]*(.+)$/u', $cmd, $m)) {
+    // 注意：(?!管理员) 让学生绑定不要吞掉「绑定管理员 <验证码>」，交给后面的管理员分支处理
+    if (qqCmdOn($c, 'bind') && preg_match('/^(?:绑定|bind)[\s:：]*(?!管理员)(.+)$/u', $cmd, $m)) {
         $name = trim($m[1]);
         $st = db()->prepare("SELECT id, name FROM class_roster WHERE name=:n LIMIT 1");
         $st->execute([':n' => $name]);
@@ -1408,7 +1409,7 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
     }
 
     // ==================== 管理员绑定与指令 ====================
-    // 绑定管理员 <6位码>（码在网页「配置管理 → 群机器人」生成，10 分钟有效）
+    // 绑定管理员 <6位码>（码在网页「配置管理 → 群机器人」生成，10 分钟有效、一次性）
     if (preg_match('/^(?:绑定管理员|管理员绑定|adminbind)[\s:：]*(\d{6})$/u', $cmd, $m)) {
         $info = qqAdminCodeCheck($m[1]);
         if (!$info) { qqReply($c, $scope, $target, $msgId, "绑定码无效或已过期。\n请在网页「配置管理 → 群机器人 → 管理员绑定」重新生成。"); return; }
@@ -1416,6 +1417,12 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
             ON DUPLICATE KEY UPDATE role='admin', user_id=VALUES(user_id), student_id=0, scope=VALUES(scope), target=VALUES(target), openid=VALUES(openid)")
             ->execute([':k' => 'admin:' . $key, ':u' => (int)($info['uid'] ?? 0), ':sc' => $scope, ':tg' => $target, ':oid' => $openid]);
         qqReply($c, $scope, $target, $msgId, '✅ 已绑定为管理员（' . (string)($info['name'] ?? '') . "）。\n发送「管理员指令」查看管理功能。");
+        return;
+    }
+
+    // 只发了「绑定管理员」但没带验证码 → 给用法提示（放在验证码分支之后，避免抢匹配）
+    if (preg_match('/^(?:绑定管理员|管理员绑定|adminbind)/u', $cmd)) {
+        qqReply($c, $scope, $target, $msgId, "用法：绑定管理员 验证码\n验证码在网页「配置管理 → 群机器人 → 管理员绑定」生成（6 位数字，10 分钟有效、一次性）。");
         return;
     }
 
