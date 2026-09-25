@@ -202,7 +202,9 @@ function handleTransactionsPost() {
     $imageIdsJson = normalizeImageIds($input['image_ids'] ?? null);
 
     if (!in_array($type, ['income', 'expense'])) jsonOutput(['error' => '类型无效'], 400);
-    if ($amount <= 0) jsonOutput(['error' => '金额必须大于 0'], 400);
+    // 班费收缴轮次允许「先建轮次、尚无缴费学生」（金额 0），后续勾选或在线缴费自动并入
+    $isCollectRound = ($type === 'income' && $subCat === '班费收缴');
+    if ($amount < 0 || ($amount <= 0 && !$isCollectRound)) jsonOutput(['error' => '金额必须大于 0'], 400);
     if (!isValidDate($date)) jsonOutput(['error' => '日期格式无效'], 400);
     if (empty($desc)) jsonOutput(['error' => '请填写描述'], 400);
 
@@ -316,13 +318,15 @@ function handleTransactionsPut() {
         $newDate = $input['date'] ?? $old['date'];
         if (!isValidDate($newDate)) jsonOutput(['error' => '日期格式无效'], 400);
 
+        $newSubCat = array_key_exists('sub_category', $input) ? (mb_substr(trim($input['sub_category']), 0, 50) ?: null) : $old['sub_category'];
+
         $newAmount = isset($input['amount']) ? sanitizeAmount($input['amount']) : $old['amount'];
-        if ($newAmount <= 0) jsonOutput(['error' => '金额必须大于 0'], 400);
+        // 班费收缴轮次允许 0 元（先建轮次、尚无缴费学生）
+        $isCollectRound = ($newType === 'income' && $newSubCat === '班费收缴');
+        if ($newAmount < 0 || ($newAmount <= 0 && !$isCollectRound)) jsonOutput(['error' => '金额必须大于 0'], 400);
 
         $newDesc = isset($input['description']) ? mb_substr(trim($input['description']), 0, 500) : $old['description'];
         if (empty($newDesc)) jsonOutput(['error' => '请填写描述'], 400);
-
-        $newSubCat = array_key_exists('sub_category', $input) ? (mb_substr(trim($input['sub_category']), 0, 50) ?: null) : $old['sub_category'];
         $newSrcInfo = array_key_exists('source_info', $input) ? (mb_substr(trim($input['source_info']), 0, 500) ?: null) : $old['source_info'];
         $newCat = mb_substr(trim($input['category'] ?? $old['category']), 0, 100);
         $newImg = array_key_exists('image_path', $input) ? (mb_substr(trim($input['image_path']), 0, 500) ?: null) : $old['image_path'];

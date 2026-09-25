@@ -121,7 +121,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     </script>
     <!-- 预加载关键资源：提前建立连接/加载JS，减少等待 -->
     <link rel="preload" href="assets/css/style.css?v=17" as="style">
-    <link rel="preload" href="assets/js/app.js?v=40" as="script">
+    <link rel="preload" href="assets/js/app.js?v=41" as="script">
     <link rel="preconnect" href="/" crossorigin>
     <script data-cfasync="false">
     // 防止 app.js 未就绪时点击登录报错：按钮先禁用，JS 加载后启用
@@ -926,7 +926,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=40" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=40')"></script>
+    <script src="assets/js/app.js?v=41" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=41')"></script>
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
     <script src="assets/js/security.js?v=5" defer data-cfasync="false"></script>
     <!-- 在线支付面板（v1.8.1） -->
@@ -934,7 +934,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <!-- 通用二级分类页签（多分栏页面） -->
     <script src="assets/js/tabs.js?v=2" defer data-cfasync="false"></script>
     <!-- 收支弹窗「班费收缴」简化模式 -->
-    <script src="assets/js/modal-tx.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/modal-tx.js?v=3" defer data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">

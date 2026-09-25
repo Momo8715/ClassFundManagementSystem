@@ -6,7 +6,7 @@
 
 > 上传即用 · 无需命令行 · 宝塔面板友好 · 支持远程一键升级
 
-[![版本](https://img.shields.io/badge/版本-v1.11.3-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
+[![版本](https://img.shields.io/badge/版本-v1.11.4-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
 [![PHP](https://img.shields.io/badge/PHP-8.0%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net)
 [![MySQL](https://img.shields.io/badge/MySQL-5.7%2B-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com)
 [![Status](https://img.shields.io/badge/状态-稳定-22c55e?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem)
@@ -365,6 +365,7 @@ GitHub Release → 下载 ZIP → 全站自动备份 → 解压覆盖 → 完成
 
 | 版本 | 说明 |
 |:---:|------|
+| **v1.11.4** | 🐛 班费收缴轮次支持「先建轮次、0 人 0 元」；进入收缴默认全部缴纳；校验提示改为明确原因（不再笼统报「无效金额」） |
 | **v1.11.3** | 🐛 修复「绑定管理员 验证码」被学生绑定指令抢匹配（提示"未找到学生「管理员 xxx」"）；无验证码时给出用法提示 |
 | **v1.11.2** | 🐛 更新检查改用 GitHub API（避免代理缓存旧版本）；升级包改用带 tag 的固定地址（避免 /latest/ 被缓存） |
 | **v1.11.1** | 🐛 修复远程升级后仍提示「发现新版本」：升级完成后以远端版本号为准回写；升级包内不再携带过期 sha256；升级后自动重新检查 |
