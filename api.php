@@ -29,7 +29,11 @@ if (!in_array($_GET['action'] ?? '', ['pay_notify', 'pay_return', 'qq_webhook'],
     requireNotBlockedIp();
 }
 
-// 加载所有模块
+// 加载所有模块（顺序：基础/账本/学期 → 业务 → 支付 → 体检）
+require_once __DIR__ . '/src/totp.php';
+require_once __DIR__ . '/src/twofa.php';
+require_once __DIR__ . '/src/fee_ledger.php';
+require_once __DIR__ . '/src/semesters.php';
 require_once __DIR__ . '/src/auth.php';
 require_once __DIR__ . '/src/transactions.php';
 require_once __DIR__ . '/src/users.php';
@@ -37,8 +41,10 @@ require_once __DIR__ . '/src/payments.php';
 require_once __DIR__ . '/src/logs.php';
 require_once __DIR__ . '/src/security.php';
 require_once __DIR__ . '/src/import_export.php';
+require_once __DIR__ . '/src/import_batches.php';
 require_once __DIR__ . '/src/report.php';
 require_once __DIR__ . '/src/pay.php';
+require_once __DIR__ . '/src/health.php';
 require_once __DIR__ . '/src/upgrade.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
@@ -54,17 +60,23 @@ $actionMethods = [
     'expected_payment' => ['GET', 'POST'],
     'classInfo' => ['GET', 'PUT'],
     'login' => ['POST'],
+    'login_2fa' => ['POST'],
     'guest_login' => ['POST'],
     'logout' => ['POST'],
+    'twofa_setup' => ['POST'],
     'change_password' => ['POST'],
     'transactions_batch' => ['POST'],
     'import' => ['POST'],
+    'import_batches' => ['GET'],
+    'import_undo' => ['POST'],
     'upload_image' => ['POST'],
     'upload_xlsx' => ['POST'],
     'roster_xlsx' => ['POST'],
     'ban_user' => ['POST'],
     'blocked_ip' => ['GET', 'POST', 'DELETE'],
     'export_security_csv' => ['GET'],
+    'health_check' => ['GET'],
+    'health_fix' => ['POST'],
     'pay_meta' => ['GET'],
     'pay_create' => ['POST'],
     'pay_config_get' => ['GET'],
@@ -92,6 +104,12 @@ switch ($action) {
     // ========== 认证 ==========
     case 'login':
         handleLogin();
+        break;
+    case 'login_2fa':
+        handleLogin2FA();
+        break;
+    case 'twofa_setup':
+        handleTwofaSetup();
         break;
     case 'guest_login':
         handleGuestLogin();
@@ -134,6 +152,12 @@ switch ($action) {
     // ========== 导入导出 ==========
     case 'import':
         handleImport();
+        break;
+    case 'import_batches':
+        handleImportBatches();
+        break;
+    case 'import_undo':
+        handleImportUndo();
         break;
     case 'upload_image':
         handleUploadImage();
@@ -205,6 +229,12 @@ switch ($action) {
         break;
     case 'export_security_csv':
         handleExportSecurityCsv();
+        break;
+    case 'health_check':
+        handleHealthCheck();
+        break;
+    case 'health_fix':
+        handleHealthFix();
         break;
 
     // ========== 在线支付 ==========

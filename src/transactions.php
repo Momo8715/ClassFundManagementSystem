@@ -207,6 +207,9 @@ function handleTransactionsPost() {
     if ($amount < 0 || ($amount <= 0 && !$isCollectRound)) jsonOutput(['error' => '金额必须大于 0'], 400);
     if (!isValidDate($date)) jsonOutput(['error' => '日期格式无效'], 400);
     if (empty($desc)) jsonOutput(['error' => '请填写描述'], 400);
+    // v1.12：已归档学期冻结手工写入
+    semesterBlockArchivedDate($date);
+    $semesterId = semesterIdForDate($date);
 
     // 处理 expected_amount
     if ($expAmt !== null && $expAmt !== '') {
@@ -260,7 +263,7 @@ function handleTransactionsPost() {
         }
     } catch (\Exception $e) { /* 检测失败不影响保存 */ }
 
-    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, per_person, date, description, payer_ids, exempt_ids, category, image_path, images, image_ids, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :pp, :d, :desc, :pids, :eids, :cat, :img, :imgs, :iids, :rb)");
+    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, expected_amount, per_person, date, description, payer_ids, exempt_ids, semester_id, category, image_path, images, image_ids, recorded_by) VALUES (:t, :sc, :si, :a, :ea, :pp, :d, :desc, :pids, :eids, :sem, :cat, :img, :imgs, :iids, :rb)");
     $stmt->execute([
         ':t'    => $type,
         ':sc'   => $subCat ?: null,
@@ -272,6 +275,7 @@ function handleTransactionsPost() {
         ':desc' => $desc,
         ':pids' => $payerIds,
         ':eids' => $exemptIdsJson,
+        ':sem'  => $semesterId ?: null,
         ':cat'  => $cat,
         ':img'  => $imagePath ?: null,
         ':imgs' => $imagesJson,
@@ -311,12 +315,17 @@ function handleTransactionsPut() {
         $old = $oldStmt->fetch();
         if (!$old) jsonOutput(['error' => '记录不存在'], 404);
 
+        // v1.12：已归档学期冻结手工写入（旧日期与新日期都要检查）
+        semesterBlockArchivedDate((string)$old['date']);
+
         // 验证输入
         $newType = $input['type'] ?? $old['type'];
         if (!in_array($newType, ['income', 'expense'])) jsonOutput(['error' => '类型无效'], 400);
 
         $newDate = $input['date'] ?? $old['date'];
         if (!isValidDate($newDate)) jsonOutput(['error' => '日期格式无效'], 400);
+        semesterBlockArchivedDate((string)$newDate);
+        $newSemesterId = semesterIdForDate((string)$newDate);
 
         $newSubCat = array_key_exists('sub_category', $input) ? (mb_substr(trim($input['sub_category']), 0, 50) ?: null) : $old['sub_category'];
 
@@ -396,7 +405,7 @@ function handleTransactionsPut() {
             if ($eligible > 0) $newPerPerson = round((float)$newExpAmt / $eligible, 2);
         }
 
-        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, per_person=:pp, date=:d, description=:desc, payer_ids=:pids, exempt_ids=:eids, category=:cat, image_path=:img, images=:imgs, image_ids=:iids WHERE id=:id");
+        $stmt = db()->prepare("UPDATE transactions SET type=:t, sub_category=:sc, source_info=:si, amount=:a, expected_amount=:ea, per_person=:pp, date=:d, description=:desc, payer_ids=:pids, exempt_ids=:eids, semester_id=:sem, category=:cat, image_path=:img, images=:imgs, image_ids=:iids WHERE id=:id");
         $stmt->execute([
             ':t'    => $newType,
             ':sc'   => $newSubCat,
@@ -408,6 +417,7 @@ function handleTransactionsPut() {
             ':desc' => $newDesc,
             ':pids' => $newPayerIds,
             ':eids' => $newExemptIds,
+            ':sem'  => $newSemesterId ?: null,
             ':cat'  => $newCat,
             ':img'  => $newImg,
             ':imgs' => $newImages,
@@ -446,6 +456,7 @@ function handleTransactionsDelete() {
     $stmt->execute([':id' => $id]);
     $old = $stmt->fetch();
     if (!$old) jsonOutput(['error' => '记录不存在'], 404);
+    semesterBlockArchivedDate((string)$old['date']);
 
     // 软删除
     db()->prepare("UPDATE transactions SET deleted_at=NOW() WHERE id=:id")->execute([':id' => $id]);
@@ -468,6 +479,13 @@ function handleTransactionsBatchDelete() {
     if (empty($ids)) jsonOutput(['error' => '请选择要删除的记录'], 400);
 
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    // v1.12：批量删除也要检查归档学期，避免绕过单条冻结
+    $check = db()->prepare("SELECT id, date FROM transactions WHERE id IN ($placeholders) AND deleted_at IS NULL");
+    $check->execute($ids);
+    foreach ($check->fetchAll() as $row) {
+        $sem = semesterArchivedForDate((string)$row['date']);
+        if ($sem) jsonOutput(['error' => '记录 #' . $row['id'] . ' 属于已归档学期「' . $sem['name'] . '」，请先取消归档'], 403);
+    }
     $stmt = db()->prepare("UPDATE transactions SET deleted_at=NOW() WHERE id IN ($placeholders) AND deleted_at IS NULL");
     $stmt->execute($ids);
     $deleted = $stmt->rowCount();

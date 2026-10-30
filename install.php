@@ -119,7 +119,13 @@ if ($step === 1 && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $already = $db->query("SHOW TABLES LIKE 'users'")->rowCount() > 0;
 
         if ($already && $forceReinstall) {
-            // 全新安装：删除全部 8 张表（含花名册/学期/凭证图/元数据，确保旧数据彻底清除）
+            // 全新安装：删除全部业务表（含支付/批次/安全表），确保旧数据彻底清除
+            $db->exec("DROP TABLE IF EXISTS import_batches");
+            $db->exec("DROP TABLE IF EXISTS fee_payments");
+            $db->exec("DROP TABLE IF EXISTS payment_orders");
+            $db->exec("DROP TABLE IF EXISTS qq_bindings");
+            $db->exec("DROP TABLE IF EXISTS security_events");
+            $db->exec("DROP TABLE IF EXISTS blocked_ips");
             $db->exec("DROP TABLE IF EXISTS tx_images");
             $db->exec("DROP TABLE IF EXISTS system_meta");
             $db->exec("DROP TABLE IF EXISTS semesters");
@@ -170,12 +176,16 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $adminId = (int)$db->lastInsertId();
 
             // 导入学生（INSERT IGNORE：与管理员/同学重名的行自动跳过，避免唯一约束导致整个安装失败）
+            // v1.12：随机初始密码 + 首次登录强制改密，避免公开用户名即可用 123456 登录
             $names = preg_split('/[\r\n]+/', $studentNames);
-            $stmtStudent = $db->prepare("INSERT IGNORE INTO users (username, password, roles) VALUES (:u, :p, :r)");
+            $studentPass = bin2hex(random_bytes(4));
+            $studentCount = 0;
+            $stmtStudent = $db->prepare("INSERT IGNORE INTO users (username, password, roles, must_change_password) VALUES (:u, :p, :r, 1)");
             foreach ($names as $name) {
                 $name = trim($name);
                 if (empty($name)) continue;
-                $stmtStudent->execute([':u' => $name, ':p' => password_hash('123456', PASSWORD_BCRYPT), ':r' => '["student"]']);
+                $stmtStudent->execute([':u' => $name, ':p' => password_hash($studentPass, PASSWORD_BCRYPT), ':r' => '["student"]']);
+                $studentCount += $stmtStudent->rowCount();
             }
 
             // 初始结余
@@ -202,6 +212,9 @@ if ($step === 2 && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $step = 3;
             $msg = '🎉 部署完成！管理员 ' . $adminName . ' 已创建。点击下方按钮进入系统。';
+            if ($studentCount > 0) {
+                $msg .= ' 学生初始密码：' . $studentPass . '（共 ' . $studentCount . ' 人，首次登录会被要求修改）。';
+            }
 
             // 如果需要重新部署，会走 GET 请求回到 step 0
         } catch (Exception $e) {
@@ -344,7 +357,7 @@ small{color:var(--text-secondary);font-size:11px;display:block;margin-top:3px}
       <div class="form-group"><label>管理员姓名 *</label><input type="text" name="admin_name" placeholder="例如: 王老师" required></div>
       <div class="form-group"><label>登录密码 *</label><input type="password" name="admin_pass" placeholder="设置管理员密码" required></div>
       <div class="form-group"><label>初始结余 / 元（可选，填入已有班费金额）</label><input type="number" name="init_balance" step="0.01" value="0" placeholder="0.00"></div>
-      <div class="form-group"><label>快速导入学生（每行一人，可选）</label><textarea name="student_names" placeholder="张三&#10;李四&#10;王五&#10;"></textarea><small>默认密码 123456，后续可在系统中修改</small></div>
+      <div class="form-group"><label>快速导入学生（每行一人，可选）</label><textarea name="student_names" placeholder="张三&#10;李四&#10;王五&#10;"></textarea><small>系统会随机生成初始密码并在完成后显示一次，学生首次登录必须修改</small></div>
       <div style="text-align:right"><button type="submit" class="btn btn-success">✅ 完成部署</button></div>
     </form>
   <?php endif; ?>
@@ -357,7 +370,7 @@ small{color:var(--text-secondary);font-size:11px;display:block;margin-top:3px}
     <div class="form-group"><label>管理员姓名 *</label><input type="text" name="admin_name" placeholder="例如: 王老师" required></div>
     <div class="form-group"><label>登录密码 *</label><input type="password" name="admin_pass" placeholder="设置管理员密码" required></div>
     <div class="form-group"><label>初始结余 / 元（可选）</label><input type="number" name="init_balance" step="0.01" value="0" placeholder="0.00"></div>
-    <div class="form-group"><label>快速导入学生（每行一人，可选）</label><textarea name="student_names" placeholder="张三&#10;李四&#10;王五&#10;"></textarea><small>默认密码 123456</small></div>
+    <div class="form-group"><label>快速导入学生（每行一人，可选）</label><textarea name="student_names" placeholder="张三&#10;李四&#10;王五&#10;"></textarea><small>随机初始密码，完成后显示一次；学生首次登录必须修改</small></div>
     <div style="text-align:right"><button type="submit" class="btn btn-success">✅ 完成部署</button></div>
   </form>
 

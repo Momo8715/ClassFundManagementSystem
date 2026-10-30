@@ -12,9 +12,16 @@ CREATE TABLE IF NOT EXISTS `users` (
   `roles`      VARCHAR(255) NOT NULL DEFAULT '["student"]' COMMENT 'JSON数组',
   `banned`     TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否封禁',
   `ban_reason` VARCHAR(500) DEFAULT NULL COMMENT '封禁理由',
+  `roster_id`  INT DEFAULT NULL COMMENT '绑定的花名册学生ID',
+  `must_change_password` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '首次登录需改密',
+  `totp_secret` VARCHAR(64) DEFAULT NULL COMMENT 'TOTP 密钥(Base32)',
+  `totp_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否启用两步验证',
+  `totp_backup` TEXT DEFAULT NULL COMMENT '备用码哈希(JSON数组)',
+  `totp_last_step` BIGINT DEFAULT NULL COMMENT '最近通过的TOTP时间步',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY `uk_username` (`username`)
+  UNIQUE KEY `uk_username` (`username`),
+  KEY `idx_roster` (`roster_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 收支记录表
@@ -30,6 +37,8 @@ CREATE TABLE IF NOT EXISTS `transactions` (
   `description`     VARCHAR(500) NOT NULL DEFAULT '',
   `payer_ids`       TEXT DEFAULT NULL COMMENT '缴费学生ID(JSON数组或all)',
   `exempt_ids`      TEXT DEFAULT NULL COMMENT '单次免缴学生ID(JSON数组)',
+  `semester_id`     INT DEFAULT NULL COMMENT '所属学期ID',
+  `import_batch`    VARCHAR(32) DEFAULT NULL COMMENT '导入批次号',
   `category`        VARCHAR(100) NOT NULL DEFAULT '其他',
   `image_path`      VARCHAR(500) DEFAULT NULL COMMENT '凭证图片路径',
   `images`          TEXT DEFAULT NULL COMMENT '多图凭证(JSON数组)',
@@ -40,7 +49,9 @@ CREATE TABLE IF NOT EXISTS `transactions` (
   `updated_at`      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY `idx_type` (`type`),
   KEY `idx_date` (`date`),
-  KEY `idx_recorded_by` (`recorded_by`)
+  KEY `idx_recorded_by` (`recorded_by`),
+  KEY `idx_semester` (`semester_id`),
+  KEY `idx_import_batch` (`import_batch`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 操作日志表（不可变 — 应用程序永不执行UPDATE/DELETE）
@@ -101,8 +112,23 @@ CREATE TABLE IF NOT EXISTS `semesters` (
   `start_date` DATE NOT NULL,
   `end_date`   DATE NOT NULL,
   `status`     ENUM('active','archived') NOT NULL DEFAULT 'active',
+  `opening_balance` DECIMAL(10,2) DEFAULT NULL COMMENT '冻结的期初余额',
+  `closing_balance` DECIMAL(10,2) DEFAULT NULL COMMENT '冻结的期末余额',
+  `total_income` DECIMAL(10,2) DEFAULT NULL,
+  `total_expense` DECIMAL(10,2) DEFAULT NULL,
+  `tx_count` INT DEFAULT NULL,
+  `pay_expected` DECIMAL(10,2) DEFAULT NULL,
+  `pay_collected` DECIMAL(10,2) DEFAULT NULL,
+  `pay_rate` DECIMAL(5,1) DEFAULT NULL,
+  `snapshot_json` MEDIUMTEXT DEFAULT NULL COMMENT '归档快照(分类/月度)',
+  `snapshot_dirty` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '归档后数据有变动',
+  `archived_at` DATETIME DEFAULT NULL,
+  `archived_by` INT DEFAULT NULL,
+  `carried_from` INT DEFAULT NULL COMMENT '从哪个学期结转',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY `uk_name` (`name`)
+  UNIQUE KEY `uk_name` (`name`),
+  KEY `idx_status` (`status`),
+  KEY `idx_dates` (`start_date`, `end_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学期管理';
 
 -- 系统元数据（key-value，用于记录 schema 版本，跳过重复迁移）
@@ -147,6 +173,65 @@ CREATE TABLE IF NOT EXISTS `security_events` (
   KEY `idx_event` (`event`),
   KEY `idx_ip` (`ipv4`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='安全事件日志';
+
+-- 支付订单（在线缴费）
+CREATE TABLE IF NOT EXISTS `payment_orders` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `order_no`     VARCHAR(40) NOT NULL COMMENT '商户订单号',
+  `student_id`   INT NOT NULL DEFAULT 0 COMMENT '花名册学生ID，0=不指定',
+  `student_name` VARCHAR(50) DEFAULT NULL,
+  `round_id`     INT NOT NULL DEFAULT 0 COMMENT '缴费轮次(transactions.id)，0=通用',
+  `amount`       DECIMAL(10,2) NOT NULL,
+  `channel`      VARCHAR(20) DEFAULT NULL COMMENT 'alipay/wxpay/qqpay',
+  `channel_id`   VARCHAR(32) DEFAULT NULL COMMENT '支付通道ID',
+  `status`       VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT 'pending/paid/closed',
+  `trade_no`     VARCHAR(64) DEFAULT NULL COMMENT '平台订单号',
+  `settle_mode`  VARCHAR(10) NOT NULL DEFAULT 'auto' COMMENT 'auto/manual',
+  `settled`      TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已核销',
+  `pay_url`      VARCHAR(1000) DEFAULT NULL,
+  `notify_raw`   TEXT,
+  `created_by`   INT NOT NULL DEFAULT 0,
+  `created_at`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `paid_at`      DATETIME DEFAULT NULL,
+  UNIQUE KEY `uk_order_no` (`order_no`),
+  KEY `idx_status` (`status`),
+  KEY `idx_student` (`student_id`),
+  KEY `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付订单';
+
+-- 在线缴费核销记录
+CREATE TABLE IF NOT EXISTS `fee_payments` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `order_no`     VARCHAR(40) NOT NULL,
+  `student_id`   INT NOT NULL DEFAULT 0,
+  `student_name` VARCHAR(50) DEFAULT NULL,
+  `round_id`     INT NOT NULL DEFAULT 0,
+  `amount`       DECIMAL(10,2) NOT NULL,
+  `channel`      VARCHAR(20) DEFAULT NULL,
+  `trade_no`     VARCHAR(64) DEFAULT NULL,
+  `tx_id`        INT DEFAULT NULL COMMENT '对应收支记录ID',
+  `paid_at`      DATETIME DEFAULT NULL,
+  `created_at`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_order_no` (`order_no`),
+  KEY `idx_student` (`student_id`),
+  KEY `idx_round` (`round_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='在线缴费核销记录';
+
+-- 导入批次（整批撤销/追溯）
+CREATE TABLE IF NOT EXISTS `import_batches` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `batch_no`     VARCHAR(32) NOT NULL,
+  `source`       VARCHAR(20) NOT NULL DEFAULT 'xlsx',
+  `filename`     VARCHAR(255) DEFAULT NULL,
+  `row_count`    INT NOT NULL DEFAULT 0,
+  `total_amount` DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `created_by`   INT NOT NULL DEFAULT 0,
+  `created_at`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `undone_at`    DATETIME DEFAULT NULL,
+  `note`         VARCHAR(255) DEFAULT NULL,
+  UNIQUE KEY `uk_batch_no` (`batch_no`),
+  KEY `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='导入批次';
 
 -- QQ 官方机器人绑定（openid -> 学生，用于 @机器人 查询个人班费）
 CREATE TABLE IF NOT EXISTS `qq_bindings` (

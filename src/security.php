@@ -271,6 +271,44 @@ function handleBlockedIp(string $method) {
 }
 
 // ==================== 回收站 ====================
+/**
+ * 彻底删除账目时清理附属资源：
+ *  - tx_images 行 + uploads/receipts 原图文件；
+ *  - fee_payments.tx_id 置空（款项仍在，但不再指向已删轮次，缴费统计按未并入处理）。
+ */
+function purgeTransactionAssets(array $ids): array {
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), function ($v) { return $v > 0; })));
+    if (empty($ids)) return ['images' => 0, 'files' => 0, 'payments' => 0];
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $imgRows = [];
+    try {
+        $st = db()->prepare("SELECT id, full_path FROM tx_images WHERE transaction_id IN ($ph)");
+        $st->execute($ids);
+        $imgRows = $st->fetchAll();
+    } catch (\Exception $e) { /* 表缺失 */ }
+    $files = 0;
+    foreach ($imgRows as $img) {
+        $rel = (string)($img['full_path'] ?? '');
+        if ($rel !== '' && strpos($rel, 'uploads/') === 0 && strpos($rel, '..') === false) {
+            $abs = dirname(__DIR__) . '/' . $rel;
+            if (is_file($abs) && @unlink($abs)) $files++;
+        }
+    }
+    $deletedImgs = 0;
+    try {
+        $del = db()->prepare("DELETE FROM tx_images WHERE transaction_id IN ($ph)");
+        $del->execute($ids);
+        $deletedImgs = $del->rowCount();
+    } catch (\Exception $e) { /* 表缺失 */ }
+    $payments = 0;
+    try {
+        $up = db()->prepare("UPDATE fee_payments SET tx_id=NULL WHERE tx_id IN ($ph)");
+        $up->execute($ids);
+        $payments = $up->rowCount();
+    } catch (\Exception $e) { /* 表缺失 */ }
+    return ['images' => $deletedImgs, 'files' => $files, 'payments' => $payments];
+}
+
 function handleRecycleBin(string $method) {
     requirePermission('deleteTransaction');
 
@@ -295,6 +333,13 @@ function handleRecycleBin(string $method) {
                 $ids = array_values(array_unique(array_filter(array_map('intval', $ids), function($v){ return $v>0; })));
                 if (empty($ids)) jsonOutput(['error' => '无效 ID'], 400);
                 $ph = implode(',', array_fill(0, count($ids), '?'));
+                // 恢复到已归档学期同样受冻结限制
+                $chk = db()->prepare("SELECT id, date FROM transactions WHERE id IN ($ph) AND deleted_at IS NOT NULL");
+                $chk->execute($ids);
+                foreach ($chk->fetchAll() as $row) {
+                    $sem = semesterArchivedForDate((string)$row['date']);
+                    if ($sem) jsonOutput(['error' => '记录 #' . $row['id'] . ' 属于已归档学期「' . $sem['name'] . '」，请先取消归档'], 403);
+                }
                 $upd = db()->prepare("UPDATE transactions SET deleted_at=NULL WHERE id IN ($ph) AND deleted_at IS NOT NULL");
                 $upd->execute($ids);
                 $n = $upd->rowCount();
@@ -304,9 +349,12 @@ function handleRecycleBin(string $method) {
             }
             if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
 
-            $chk = db()->prepare("SELECT id FROM transactions WHERE id=:id AND deleted_at IS NOT NULL");
+            $chk = db()->prepare("SELECT id, date FROM transactions WHERE id=:id AND deleted_at IS NOT NULL");
             $chk->execute([':id' => $id]);
-            if (!$chk->fetch()) jsonOutput(['error' => '记录不存在或不在回收站中'], 404);
+            $chkRow = $chk->fetch();
+            if (!$chkRow) jsonOutput(['error' => '记录不存在或不在回收站中'], 404);
+            $sem = semesterArchivedForDate((string)$chkRow['date']);
+            if ($sem) jsonOutput(['error' => '该记录属于已归档学期「' . $sem['name'] . '」，请先取消归档'], 403);
 
             db()->prepare("UPDATE transactions SET deleted_at=NULL WHERE id=:id")
                 ->execute([':id' => $id]);
@@ -323,6 +371,8 @@ function handleRecycleBin(string $method) {
             $ids = $input['ids'] ?? null;
             if (is_string($ids)) $ids = json_decode($ids, true) ?: [];
             if (($input['all'] ?? false) || ($_GET['all'] ?? '') === '1') {
+                $allIds = db()->query("SELECT id FROM transactions WHERE deleted_at IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+                purgeTransactionAssets(array_map('intval', $allIds));
                 $delAll = db()->query("DELETE FROM transactions WHERE deleted_at IS NOT NULL");
                 $n = $delAll->rowCount();
                 $user = currentUser();
@@ -333,6 +383,7 @@ function handleRecycleBin(string $method) {
                 $ids = array_values(array_unique(array_filter(array_map('intval', $ids), function($v){ return $v>0; })));
                 if (empty($ids)) jsonOutput(['error' => '无效 ID'], 400);
                 $ph = implode(',', array_fill(0, count($ids), '?'));
+                purgeTransactionAssets($ids);
                 $delBatch = db()->prepare("DELETE FROM transactions WHERE id IN ($ph) AND deleted_at IS NOT NULL");
                 $delBatch->execute($ids);
                 $n = $delBatch->rowCount();
@@ -347,6 +398,7 @@ function handleRecycleBin(string $method) {
             $old = $oldStmt->fetch();
             if (!$old) jsonOutput(['error' => '记录不存在或不在回收站中'], 404);
 
+            purgeTransactionAssets([$id]);
             db()->prepare("DELETE FROM transactions WHERE id=:id")
                 ->execute([':id' => $id]);
 

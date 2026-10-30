@@ -185,6 +185,15 @@ function autoMigrate(): void {
         }
         if (!in_array('banned', $uCols)) $db->exec("ALTER TABLE users ADD COLUMN banned TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否封禁' AFTER roles");
         if (!in_array('ban_reason', $uCols)) $db->exec("ALTER TABLE users ADD COLUMN ban_reason VARCHAR(500) DEFAULT NULL COMMENT '封禁理由' AFTER banned");
+        // v1.12：账号 ↔ 花名册绑定（在线缴费/我的班费按本人校验）
+        if (!in_array('roster_id', $uCols)) $db->exec("ALTER TABLE users ADD COLUMN roster_id INT DEFAULT NULL COMMENT '绑定的花名册学生ID' AFTER ban_reason");
+        // v1.12：首次登录强制改密（随机初始密码/管理员重置后置 1）
+        if (!in_array('must_change_password', $uCols)) $db->exec("ALTER TABLE users ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0 COMMENT '首次登录需改密' AFTER roster_id");
+        // v1.12：两步验证（TOTP）
+        if (!in_array('totp_secret', $uCols)) $db->exec("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64) DEFAULT NULL COMMENT 'TOTP 密钥(Base32)' AFTER must_change_password");
+        if (!in_array('totp_enabled', $uCols)) $db->exec("ALTER TABLE users ADD COLUMN totp_enabled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否启用两步验证' AFTER totp_secret");
+        if (!in_array('totp_backup', $uCols)) $db->exec("ALTER TABLE users ADD COLUMN totp_backup TEXT DEFAULT NULL COMMENT '备用码哈希(JSON数组)' AFTER totp_enabled");
+        if (!in_array('totp_last_step', $uCols)) $db->exec("ALTER TABLE users ADD COLUMN totp_last_step BIGINT DEFAULT NULL COMMENT '最近通过的TOTP时间步(防重放)' AFTER totp_backup");
 
         // class_roster 班级花名册
         $db->exec("CREATE TABLE IF NOT EXISTS class_roster (
@@ -230,6 +239,15 @@ function autoMigrate(): void {
         if (!in_array('image_ids', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN image_ids TEXT DEFAULT NULL COMMENT '凭证图片ID(JSON数组，存tx_images.id)' AFTER images");
         // transactions.exempt_ids 单次免缴学生（v1.6：本轮免缴学生ID JSON数组，与永久免缴 exempt 字段独立）
         if (!in_array('exempt_ids', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN exempt_ids TEXT DEFAULT NULL COMMENT '单次免缴学生ID(JSON数组)' AFTER payer_ids");
+        // v1.12：学期归属（归档/结转/报表按学期冻结）
+        if (!in_array('semester_id', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN semester_id INT DEFAULT NULL COMMENT '所属学期ID' AFTER exempt_ids");
+        // v1.12：导入批次（支持整批撤销与去重）
+        if (!in_array('import_batch', $cols)) $db->exec("ALTER TABLE transactions ADD COLUMN import_batch VARCHAR(32) DEFAULT NULL COMMENT '导入批次号' AFTER semester_id");
+        try {
+            $idx = $db->query("SHOW INDEX FROM transactions WHERE Key_name IN ('idx_semester','idx_import_batch')")->fetchAll(PDO::FETCH_COLUMN, 2);
+            if (!in_array('idx_semester', $idx)) $db->exec("ALTER TABLE transactions ADD KEY idx_semester (semester_id)");
+            if (!in_array('idx_import_batch', $idx)) $db->exec("ALTER TABLE transactions ADD KEY idx_import_batch (import_batch)");
+        } catch (\Exception $e) { /* 索引已存在/权限不足时忽略 */ }
 
         // tx_images 凭证图片库（v1.5.6：原图+缩略图二进制存数据库，不再依赖 uploads/ 文件）
         $db->exec("CREATE TABLE IF NOT EXISTS tx_images (
@@ -335,16 +353,123 @@ function autoMigrate(): void {
             }
         } catch (\Exception $e) { error_log('[班费系统] 回填 per_person 失败: ' . $e->getMessage()); }
 
-        // semesters 学期表
+        // semesters 学期表（v1.12：归档快照 / 结转余额 / 结账标记）
         $db->exec("CREATE TABLE IF NOT EXISTS semesters (
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(50) NOT NULL,
             start_date DATE NOT NULL,
             end_date DATE NOT NULL,
             status ENUM('active','archived') NOT NULL DEFAULT 'active',
+            opening_balance DECIMAL(10,2) DEFAULT NULL COMMENT '冻结的期初余额',
+            closing_balance DECIMAL(10,2) DEFAULT NULL COMMENT '冻结的期末余额',
+            total_income DECIMAL(10,2) DEFAULT NULL,
+            total_expense DECIMAL(10,2) DEFAULT NULL,
+            tx_count INT DEFAULT NULL,
+            pay_expected DECIMAL(10,2) DEFAULT NULL,
+            pay_collected DECIMAL(10,2) DEFAULT NULL,
+            pay_rate DECIMAL(5,1) DEFAULT NULL,
+            snapshot_json MEDIUMTEXT DEFAULT NULL COMMENT '归档快照(分类/月度)',
+            snapshot_dirty TINYINT(1) NOT NULL DEFAULT 0 COMMENT '归档后数据有变动',
+            archived_at DATETIME DEFAULT NULL,
+            archived_by INT DEFAULT NULL,
+            carried_from INT DEFAULT NULL COMMENT '从哪个学期结转',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY uk_name (name)
+            UNIQUE KEY uk_name (name),
+            KEY idx_status (status),
+            KEY idx_dates (start_date, end_date)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学期管理'");
+
+        // semesters 旧库补列（v1.12）
+        try {
+            $semCols = $db->query("SHOW COLUMNS FROM semesters")->fetchAll(PDO::FETCH_COLUMN);
+            $semAdd = [
+                'opening_balance' => "ALTER TABLE semesters ADD COLUMN opening_balance DECIMAL(10,2) DEFAULT NULL COMMENT '冻结的期初余额' AFTER status",
+                'closing_balance' => "ALTER TABLE semesters ADD COLUMN closing_balance DECIMAL(10,2) DEFAULT NULL COMMENT '冻结的期末余额' AFTER opening_balance",
+                'total_income' => "ALTER TABLE semesters ADD COLUMN total_income DECIMAL(10,2) DEFAULT NULL AFTER closing_balance",
+                'total_expense' => "ALTER TABLE semesters ADD COLUMN total_expense DECIMAL(10,2) DEFAULT NULL AFTER total_income",
+                'tx_count' => "ALTER TABLE semesters ADD COLUMN tx_count INT DEFAULT NULL AFTER total_expense",
+                'pay_expected' => "ALTER TABLE semesters ADD COLUMN pay_expected DECIMAL(10,2) DEFAULT NULL AFTER tx_count",
+                'pay_collected' => "ALTER TABLE semesters ADD COLUMN pay_collected DECIMAL(10,2) DEFAULT NULL AFTER pay_expected",
+                'pay_rate' => "ALTER TABLE semesters ADD COLUMN pay_rate DECIMAL(5,1) DEFAULT NULL AFTER pay_collected",
+                'snapshot_json' => "ALTER TABLE semesters ADD COLUMN snapshot_json MEDIUMTEXT DEFAULT NULL COMMENT '归档快照(分类/月度)' AFTER pay_rate",
+                'snapshot_dirty' => "ALTER TABLE semesters ADD COLUMN snapshot_dirty TINYINT(1) NOT NULL DEFAULT 0 COMMENT '归档后数据有变动' AFTER snapshot_json",
+                'archived_at' => "ALTER TABLE semesters ADD COLUMN archived_at DATETIME DEFAULT NULL AFTER snapshot_dirty",
+                'archived_by' => "ALTER TABLE semesters ADD COLUMN archived_by INT DEFAULT NULL AFTER archived_at",
+                'carried_from' => "ALTER TABLE semesters ADD COLUMN carried_from INT DEFAULT NULL COMMENT '从哪个学期结转' AFTER archived_by",
+            ];
+            foreach ($semAdd as $col => $sql) {
+                if (!in_array($col, $semCols, true)) $db->exec($sql);
+            }
+        } catch (\Exception $e) { /* 忽略，下次请求重试 */ }
+
+        // 老版本已归档的学期补一次结账快照（v1.12 升级时执行；已有快照的不覆盖）
+        try {
+            $oldArchived = $db->query("SELECT * FROM semesters WHERE status='archived' AND (opening_balance IS NULL OR closing_balance IS NULL)")->fetchAll();
+            foreach ($oldArchived as $sem) {
+                $start = (string)$sem['start_date'];
+                $end = (string)$sem['end_date'];
+                $beginStmt = $db->prepare("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE -amount END),0) FROM transactions WHERE deleted_at IS NULL AND date < :d");
+                $beginStmt->execute([':d' => $start]);
+                $begin = round((float)$beginStmt->fetchColumn(), 2);
+                $endStmt = $db->prepare("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE -amount END),0) FROM transactions WHERE deleted_at IS NULL AND date <= :d");
+                $endStmt->execute([':d' => $end]);
+                $endBal = round((float)$endStmt->fetchColumn(), 2);
+                $sumStmt = $db->prepare("SELECT
+                    COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) ti,
+                    COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) te,
+                    COALESCE(SUM(CASE WHEN type='income' THEN 1 ELSE 0 END),0) ic,
+                    COALESCE(SUM(CASE WHEN type='expense' THEN 1 ELSE 0 END),0) ec
+                    FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e");
+                $sumStmt->execute([':s' => $start, ':e' => $end]);
+                $sum = $sumStmt->fetch() ?: ['ti' => 0, 'te' => 0, 'ic' => 0, 'ec' => 0];
+                $payStmt = $db->prepare("SELECT COALESCE(SUM(expected_amount),0) pe, COALESCE(SUM(amount),0) pc
+                    FROM transactions WHERE type='income' AND sub_category='班费收缴' AND deleted_at IS NULL AND date BETWEEN :s AND :e");
+                $payStmt->execute([':s' => $start, ':e' => $end]);
+                $pay = $payStmt->fetch() ?: ['pe' => 0, 'pc' => 0];
+                $pe = round((float)$pay['pe'], 2);
+                $pc = round((float)$pay['pc'], 2);
+                $upd = $db->prepare("UPDATE semesters SET opening_balance=:ob, closing_balance=:cb, total_income=:ti, total_expense=:te,
+                    tx_count=:tc, pay_expected=:pe, pay_collected=:pc, pay_rate=:pr,
+                    archived_at=COALESCE(archived_at, NOW()) WHERE id=:id");
+                $upd->execute([
+                    ':ob' => $begin, ':cb' => $endBal,
+                    ':ti' => round((float)$sum['ti'], 2), ':te' => round((float)$sum['te'], 2),
+                    ':tc' => (int)$sum['ic'] + (int)$sum['ec'], ':pe' => $pe, ':pc' => $pc,
+                    ':pr' => $pe > 0 ? round($pc / $pe * 100, 1) : 0, ':id' => (int)$sem['id'],
+                ]);
+            }
+        } catch (\Exception $e) { /* 忽略，不阻断升级 */ }
+
+        // import_batches 导入批次（v1.12：整批撤销/追溯）
+        $db->exec("CREATE TABLE IF NOT EXISTS import_batches (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            batch_no VARCHAR(32) NOT NULL,
+            source VARCHAR(20) NOT NULL DEFAULT 'xlsx',
+            filename VARCHAR(255) DEFAULT NULL,
+            row_count INT NOT NULL DEFAULT 0,
+            total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+            created_by INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            undone_at DATETIME DEFAULT NULL,
+            note VARCHAR(255) DEFAULT NULL,
+            UNIQUE KEY uk_batch_no (batch_no),
+            KEY idx_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='导入批次'");
+
+        // 回填学期归属（按日期落入已存在的学期；重叠学期由数据体检提示）
+        try {
+            $db->exec("UPDATE transactions t JOIN semesters s
+                ON t.date BETWEEN s.start_date AND s.end_date
+                SET t.semester_id = s.id
+                WHERE t.semester_id IS NULL");
+        } catch (\Exception $e) { /* 忽略 */ }
+
+        // 回填用户 ↔ 花名册绑定（用户名与姓名完全一致时自动绑定）
+        try {
+            $db->exec("UPDATE users u JOIN class_roster r ON u.username = r.name
+                SET u.roster_id = r.id
+                WHERE u.roster_id IS NULL");
+        } catch (\Exception $e) { /* 忽略 */ }
 
         // QQ 官方机器人绑定（openid -> 学生），用于 @机器人 查班费
         $db->exec("CREATE TABLE IF NOT EXISTS qq_bindings (
@@ -385,7 +510,7 @@ define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
 // 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
 // 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
-define('SCHEMA_VERSION', '1.18');
+define('SCHEMA_VERSION', '1.19');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([
@@ -443,6 +568,7 @@ define('PERMISSIONS', json_encode([
     'manageRoster'      => ['head_teacher','admin','monitor','vice_monitor'],
     'deleteRoster'      => ['head_teacher','admin'],
     'viewPayments'      => ['head_teacher','admin','monitor','vice_monitor','finance'],
+    'viewHealth'        => ['head_teacher','admin','finance'],   // 数据体检 / 对账中心（只读）
 ]));
 
 // ========== 数据库连接 ==========
@@ -674,11 +800,39 @@ function currentUser(): ?array {
     if (!isset($_SESSION['user_id'])) return null;
     $roles = $_SESSION['roles'] ?? [];
     return [
-        'id'           => $_SESSION['user_id'],
-        'username'     => $_SESSION['username'],
-        'roles'        => sortRolesByPriority($roles),
-        'highest_role' => getHighestRole($roles),
+        'id'                   => $_SESSION['user_id'],
+        'username'             => $_SESSION['username'],
+        'roles'                => sortRolesByPriority($roles),
+        'highest_role'         => getHighestRole($roles),
+        'roster_id'            => (int)($_SESSION['roster_id'] ?? 0),
+        'student_name'         => (string)($_SESSION['student_name'] ?? ''),
+        'totp_enabled'         => !empty($_SESSION['totp_enabled']),
+        'must_change_password' => !empty($_SESSION['must_change_password']),
     ];
+}
+
+/**
+ * 当前登录账号绑定的花名册学生 ID（0=未绑定）。
+ * 优先 users.roster_id；为空时按「用户名 == 花名册姓名」自动绑定一次。
+ * 用于在线缴费/我的班费的身份校验，避免任意登录用户查看或代缴他人。
+ */
+function currentStudentId(): int {
+    $user = currentUser();
+    if (!$user || (int)$user['id'] <= 0) return 0;
+    $rid = (int)($user['roster_id'] ?? 0);
+    if ($rid > 0) return $rid;
+    try {
+        $stmt = db()->prepare("SELECT id FROM class_roster WHERE name=:n LIMIT 1");
+        $stmt->execute([':n' => $user['username']]);
+        $id = (int)$stmt->fetchColumn();
+        if ($id > 0) {
+            db()->prepare("UPDATE users SET roster_id=:r WHERE id=:u")->execute([':r' => $id, ':u' => (int)$user['id']]);
+            $_SESSION['roster_id'] = $id;
+        }
+        return $id;
+    } catch (\Exception $e) {
+        return 0;
+    }
 }
 
 function requireLogin() {
@@ -693,9 +847,14 @@ function requireLogin() {
         $checkedAt = (int)($_SESSION['ban_checked_at'] ?? 0);
         if ($checkedAt + 60 < time()) {
             try {
-                $stmt = db()->prepare("SELECT banned FROM users WHERE id=:id");
+                $stmt = db()->prepare("SELECT banned, must_change_password FROM users WHERE id=:id");
                 $stmt->execute([':id' => $uid]);
-                $_SESSION['banned'] = ((int)$stmt->fetchColumn() === 1);
+                $row = $stmt->fetch();
+                if ($row) {
+                    $_SESSION['banned'] = ((int)$row['banned'] === 1);
+                    // 管理员刚重置密码时，最多 60 秒内让已有会话也进入强制改密
+                    $_SESSION['must_change_password'] = !empty($row['must_change_password']);
+                }
                 $_SESSION['ban_checked_at'] = time();
             } catch (\Exception $e) {
                 // 数据库异常时不阻断请求
@@ -706,6 +865,16 @@ function requireLogin() {
             session_destroy();
             http_response_code(403);
             echo json_encode(['error' => '账号已被管理员限制登录']);
+            exit;
+        }
+    }
+    // v1.12：初始密码/管理员重置密码后，必须改密才能使用其他接口
+    if (!empty($_SESSION['must_change_password'])) {
+        $action = (string)($_GET['action'] ?? '');
+        $allowed = ['me', 'change_password', 'logout', 'twofa_setup'];
+        if (!in_array($action, $allowed, true)) {
+            http_response_code(403);
+            echo json_encode(['error' => '首次登录请先修改密码', 'must_change_password' => true], JSON_UNESCAPED_UNICODE);
             exit;
         }
     }

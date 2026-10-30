@@ -14,8 +14,11 @@ function handleImport() {
     if (empty($records)) jsonOutput(['error' => '没有可导入的数据'], 400);
 
     $user = currentUser();
-    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, date, description, category, recorded_by) VALUES (:t, :sc, :si, :a, :d, :desc, :cat, :rb)");
+    $batchNo = importBatchNo();
+    $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, date, description, category, recorded_by, semester_id, import_batch) VALUES (:t, :sc, :si, :a, :d, :desc, :cat, :rb, :sem, :batch)");
     $count = 0;
+    $skipped = 0;
+    $total = 0.0;
     $errors = [];
 
     db()->beginTransaction();
@@ -31,20 +34,36 @@ function handleImport() {
 
             if ($amt <= 0 || !isValidDate($date)) {
                 $errors[] = "第 " . ($i + 1) . " 行数据无效";
+                $skipped++;
+                continue;
+            }
+            $sem = semesterArchivedForDate($date);
+            if ($sem) {
+                $errors[] = "第 " . ($i + 1) . " 行属于已归档学期「" . $sem['name'] . "」，已跳过";
+                $skipped++;
+                continue;
+            }
+            if (importIsDuplicate($type, $amt, $date, $desc)) {
+                $errors[] = "第 " . ($i + 1) . " 行疑似重复，已跳过";
+                $skipped++;
                 continue;
             }
             $stmt->execute([
-                ':t'    => $type,
-                ':sc'   => $sc ?: null,
-                ':si'   => ($sc === '其他来源') ? $si : null,
-                ':a'    => $amt,
-                ':d'    => $date,
-                ':desc' => $desc,
-                ':cat'  => $cat,
-                ':rb'   => $user['id']
+                ':t'     => $type,
+                ':sc'    => $sc ?: null,
+                ':si'    => ($sc === '其他来源') ? $si : null,
+                ':a'     => $amt,
+                ':d'     => $date,
+                ':desc'  => $desc,
+                ':cat'   => $cat,
+                ':rb'    => $user['id'],
+                ':sem'   => semesterIdForDate($date) ?: null,
+                ':batch' => $batchNo,
             ]);
             $count++;
+            $total += $amt;
         }
+        if ($count > 0) importRecordBatch($batchNo, 'json', null, $count, $total, (int)$user['id'], 'JSON 导入');
         db()->commit();
     } catch (\Exception $e) {
         db()->rollBack();
@@ -53,10 +72,10 @@ function handleImport() {
     }
 
     addLog($user['id'], $user['username'], 'import', 'transaction', null, [
-        'count' => $count, 'errors' => $errors
+        'count' => $count, 'skipped' => $skipped, 'batch_no' => $batchNo, 'errors' => $errors
     ]);
 
-    jsonOutput(['ok' => true, 'imported' => $count, 'errors' => $errors]);
+    jsonOutput(['ok' => true, 'imported' => $count, 'skipped' => $skipped, 'batch_no' => $count > 0 ? $batchNo : null, 'errors' => $errors]);
 }
 
 // ==================== 图片上传 ====================
@@ -167,9 +186,10 @@ function handleUploadImage() {
 }
 
 // ==================== 凭证图片读取（数据库） ====================
-/** api.php?action=tx_image&id=X&thumb=1|0 输出数据库中的凭证图片（登录用户/访客均可查看） */
+/** api.php?action=tx_image&id=X&thumb=1|0 输出数据库中的凭证图片（登录用户可查看，访客禁止遍历） */
 function handleTxImage() {
-    requireLogin();
+    requirePermission('viewTransactions');
+    if ((int)(currentUser()['id'] ?? 0) === 0) jsonOutput(['error' => '访客无权查看凭证'], 403);
 
     $id = intval($_GET['id'] ?? 0);
     if ($id <= 0) jsonOutput(['error' => '无效图片 ID'], 400);
@@ -321,26 +341,46 @@ function handleUploadXlsx() {
     if ($doImport && !empty($rows)) {
         requireCsrfToken();
         $user = currentUser();
-        $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, date, description, category, recorded_by) VALUES (:t, :sc, :si, :a, :d, :desc, :cat, :rb)");
+        $batchNo = importBatchNo();
+        $filename = mb_substr((string)($_FILES['xlsx']['name'] ?? ''), 0, 255);
+        $stmt = db()->prepare("INSERT INTO transactions (type, sub_category, source_info, amount, date, description, category, recorded_by, semester_id, import_batch) VALUES (:t, :sc, :si, :a, :d, :desc, :cat, :rb, :sem, :batch)");
         $count = 0;
+        $skipped = 0;
+        $total = 0.0;
+        $errors = [];
         db()->beginTransaction();
         try {
-            foreach ($rows as $r) {
+            foreach ($rows as $idx => $r) {
+                $sem = semesterArchivedForDate((string)$r['date']);
+                if ($sem) {
+                    $errors[] = '第 ' . ($idx + 1) . ' 行属于已归档学期「' . $sem['name'] . '」，已跳过';
+                    $skipped++;
+                    continue;
+                }
+                if (importIsDuplicate((string)$r['type'], (float)$r['amount'], (string)$r['date'], (string)$r['description'])) {
+                    $errors[] = '第 ' . ($idx + 1) . ' 行疑似重复，已跳过';
+                    $skipped++;
+                    continue;
+                }
                 $stmt->execute([
                     ':t' => $r['type'], ':sc' => $r['sub_category'] ?: null,
                     ':si' => $r['source_info'] ?: null, ':a' => $r['amount'],
                     ':d' => $r['date'], ':desc' => $r['description'],
-                    ':cat' => $r['category'], ':rb' => $user['id']
+                    ':cat' => $r['category'], ':rb' => $user['id'],
+                    ':sem' => semesterIdForDate((string)$r['date']) ?: null,
+                    ':batch' => $batchNo,
                 ]);
                 $count++;
+                $total += (float)$r['amount'];
             }
+            if ($count > 0) importRecordBatch($batchNo, 'xlsx', $filename ?: null, $count, $total, (int)$user['id'], 'Excel 导入');
             db()->commit();
         } catch (\Exception $e) {
             db()->rollBack();
             jsonOutput(['error' => '导入失败，请检查数据格式后重试'], 500);
         }
-        addLog($user['id'], $user['username'], 'import_xlsx', 'transaction', null, ['count' => $count]);
-        jsonOutput(['ok' => true, 'imported' => $count, 'preview' => $rows]);
+        addLog($user['id'], $user['username'], 'import_xlsx', 'transaction', null, ['count' => $count, 'skipped' => $skipped, 'batch_no' => $batchNo, 'errors' => $errors]);
+        jsonOutput(['ok' => true, 'imported' => $count, 'skipped' => $skipped, 'batch_no' => $count > 0 ? $batchNo : null, 'errors' => $errors, 'preview' => $rows]);
     }
 
     jsonOutput(['ok' => true, 'preview' => $rows, 'count' => count($rows)]);
@@ -455,6 +495,7 @@ function amountToChinese(float $amount): string {
 /** 生成打印友好收据页（浏览器打印/另存 PDF） */
 function handleReceipt() {
     requirePermission('viewTransactions');
+    if ((int)(currentUser()['id'] ?? 0) === 0) jsonOutput(['error' => '访客无权打印收据'], 403);
 
     $id = intval($_GET['id'] ?? 0);
     if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
@@ -513,6 +554,8 @@ function handleReceipt() {
 // ==================== xlsx 生成器 ====================
 function outputSimpleXlsx(string $filename, string $sheetName, array $headers, array $rows) {
     $tmpFile = tempnam(sys_get_temp_dir(), 'xlsx');
+    // PHP 8.3 起 zip 不能直接打开空文件；tempnam 会先创建空文件，删掉后由 ZipArchive::CREATE 新建
+    @unlink($tmpFile);
     $zip = new ZipArchive();
     if ($zip->open($tmpFile, ZipArchive::CREATE) !== true) return false;
 
@@ -618,6 +661,8 @@ function xlsxStylesXml(): string {
  */
 function outputStyledXlsx(string $filename, string $sheetName, array $colWidths, array $rows, ?array $chart = null): bool {
     $tmpFile = tempnam(sys_get_temp_dir(), 'xlsx');
+    // PHP 8.3 起 zip 不能直接打开空文件
+    @unlink($tmpFile);
     $zip = new ZipArchive();
     if ($zip->open($tmpFile, ZipArchive::CREATE) !== true) return false;
 

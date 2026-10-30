@@ -104,7 +104,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     .hint{font-size:12px;color:#94a3b8;text-align:center;margin-top:12px;font-family:-apple-system,sans-serif;}
     .wave{display:inline-block;}
     </style>
-    <link rel="stylesheet" href="assets/css/style.css?v=17" onerror="window.__retryResource(this,'assets/css/style.css?v=17')">
+    <link rel="stylesheet" href="assets/css/style.css?v=18" onerror="window.__retryResource(this,'assets/css/style.css?v=18')">
     <!-- 移动端优化 + 收支详情 / 凭证查看 -->
     <link rel="stylesheet" href="assets/css/mobile.css?v=2">
     <style data-cfasync="false">
@@ -122,7 +122,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     }
     </script>
     <!-- 预加载关键资源：提前建立连接/加载JS，减少等待 -->
-    <link rel="preload" href="assets/css/style.css?v=17" as="style">
+    <link rel="preload" href="assets/css/style.css?v=18" as="style">
     <link rel="preload" href="assets/js/app.js?v=43" as="script">
     <link rel="preconnect" href="/" crossorigin>
     <script data-cfasync="false">
@@ -226,11 +226,17 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <span class="icon">⚙️</span> 配置管理
                 </button>
                 <?php endif; ?>
+                <?php if (hasPermission('viewHealth')): ?>
+                <button data-page="health" onclick="switchPage('health');window._healthLoad&&window._healthLoad()" id="navHealth">
+                    <span class="icon">🩺</span> 数据体检
+                </button>
+                <?php endif; ?>
                 <button data-page="recycle" onclick="switchPage('recycle')" id="navRecycle">
                     <span class="icon">🗑️</span> 回收站
                 </button>
             </nav>
             <div class="sidebar-footer">
+                <button class="btn-pwd" onclick="window._accountSecurityOpen&&window._accountSecurityOpen()">🔐 账号安全</button>
                 <button class="btn-pwd" onclick="showChangePassword()">🔑 修改密码</button>
                 <button class="btn-logout" onclick="doLogout()">🚪 退出登录</button>
             </div>
@@ -308,9 +314,10 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                                 <span style="font-size:12px;color:var(--text-secondary)">至</span>
                                 <input type="date" id="semEnd" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
                                 <button class="btn btn-primary btn-sm" onclick="window._createSemester()">➕ 新建学期</button>
-                                <span style="font-size:11px;color:var(--text-secondary)">期末后归档当前学期，即为「结转」</span>
+                                <span style="font-size:11px;color:var(--text-secondary)">归档并结转会冻结该学期的期初/期末余额与报表快照</span>
                             </div>
                             <div id="semesterTable"></div>
+                            <div id="semesterCarry" style="margin-top:16px"></div>
                         </div>
                     </div>
                 </div>
@@ -378,6 +385,13 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                         <button class="btn btn-success btn-sm" onclick="importXlsx()">✅ 导入</button>
                     </div>
                     <div id="importPreview"></div>
+                </div>
+                <div style="margin-top:18px;background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);max-width:1000px">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+                        <h4 style="font-size:14px">📜 导入批次（可整批撤销）</h4>
+                        <button class="btn btn-outline btn-sm" onclick="window._importBatchesLoad&&window._importBatchesLoad()">🔄 刷新</button>
+                    </div>
+                    <div id="importBatches"><div class="empty" style="padding:14px">打开本页后自动加载最近批次</div></div>
                 </div>
             </div>
 
@@ -514,6 +528,21 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                 <p id="payConfigHint" style="font-size:12px;color:var(--text-secondary);margin-top:8px"></p>
                 <div id="payResult" style="margin-top:12px"></div>
             </div>
+
+            <!-- 数据体检 / 对账中心 -->
+            <?php if (hasPermission('viewHealth')): ?>
+            <div class="page" id="page-health">
+                <div class="section-header">
+                    <h3>🩺 数据体检 / 对账中心</h3>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <span id="healthChecked" style="font-size:11px;color:var(--text-secondary)"></span>
+                        <button class="btn btn-outline btn-sm" onclick="window._healthLoad&&window._healthLoad()">🔄 重新检查</button>
+                    </div>
+                </div>
+                <div class="cards" id="healthSummary"></div>
+                <div id="healthSections"></div>
+            </div>
+            <?php endif; ?>
 
             <!-- 安全分析（仅管理员可查看） -->
             <?php if (hasPermission('viewSecurity')): ?>
@@ -835,6 +864,17 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
         </div>
     </div>
 
+    <!-- 账号安全（两步验证） -->
+    <div class="modal-overlay" id="modalAccount">
+        <div class="modal" style="width:540px;max-width:94vw">
+            <h3>🔐 账号安全</h3>
+            <div id="accountBody"><div class="loading"><div class="spinner"></div><p>加载中...</p></div></div>
+            <div class="btn-row">
+                <button class="btn btn-outline" onclick="closeModal('modalAccount')">关闭</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 收支弹窗 -->
     <div class="modal-overlay" id="modalTx">
         <div class="modal">
@@ -891,7 +931,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
         <div class="modal">
             <h3 id="modalStudentTitle">添加用户</h3>
             <div class="form-group"><label>姓名</label><input type="text" id="stuName"></div>
-            <div class="form-group"><label>密码</label><input type="password" id="stuPass" value="123456"></div>
+            <div class="form-group"><label>初始密码</label><input type="password" id="stuPass" value="" placeholder="留空则服务端随机生成" autocomplete="new-password"></div>
             <div class="form-group">
                 <label>角色</label>
                 <div class="checkbox-group" id="stuRoles">
@@ -922,8 +962,14 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
             'username' => $_SESSION['username'],
             'roles' => $_SESSION['roles'] ?? [],
             'is_guest' => $_SESSION['is_guest'] ?? false,
+            'roster_id' => (int)($_SESSION['roster_id'] ?? 0),
+            'student_name' => (string)($_SESSION['student_name'] ?? ''),
+            'totp_enabled' => !empty($_SESSION['totp_enabled']),
+            'must_change_password' => !empty($_SESSION['must_change_password']),
         ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         window._initialCsrf = <?php echo json_encode($_SESSION['csrf_token'] ?? '', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        window._canFixHealth = <?php echo hasPermission('manageAllAccounts') ? 'true' : 'false'; ?>;
+        window._canViewHealth = <?php echo hasPermission('viewHealth') ? 'true' : 'false'; ?>;
     </script>
     <?php endif; ?>
 
@@ -939,6 +985,14 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <script src="assets/js/modal-tx.js?v=3" defer data-cfasync="false"></script>
     <!-- 移动端优化：收支详情 + 发票/图片凭证查看（依赖 app.js） -->
     <script src="assets/js/mobile.js?v=2" defer data-cfasync="false"></script>
+    <!-- 两步验证登录 / 账号安全 / 首次改密 -->
+    <script src="assets/js/login-2fa.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/account.js?v=1" defer data-cfasync="false"></script>
+    <!-- 学期结转 / 导入批次 / 数据体检 -->
+    <script src="assets/js/semester-carry.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/import-batches.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/health.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/admin-users.js?v=1" defer data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">

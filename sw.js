@@ -1,9 +1,9 @@
 // 班级班费管理系统 - Service Worker（PWA 离线缓存）
 // 只缓存静态资源，绝不缓存动态 API / HTML 登录页（防止数据陈旧）
 // 注意：不要预缓存 './'——登录态下的首页 HTML 含用户名与 CSRF token，不应写入 Cache Storage
-const CACHE_NAME = 'classfund-static-v37';
+const CACHE_NAME = 'classfund-static-v38';
 const STATIC_ASSETS = [
-  './assets/css/style.css?v=17',
+  './assets/css/style.css?v=18',
   './assets/css/mobile.css?v=2',
   './assets/js/app.js?v=43',
   './assets/js/security.js?v=5',
@@ -11,6 +11,12 @@ const STATIC_ASSETS = [
   './assets/js/tabs.js?v=2',
   './assets/js/modal-tx.js?v=3',
   './assets/js/mobile.js?v=2',
+  './assets/js/login-2fa.js?v=1',
+  './assets/js/account.js?v=1',
+  './assets/js/semester-carry.js?v=1',
+  './assets/js/import-batches.js?v=1',
+  './assets/js/health.js?v=1',
+  './assets/js/admin-users.js?v=1',
   './manifest.json'
 ];
 

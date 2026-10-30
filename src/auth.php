@@ -39,30 +39,37 @@ function handleLogin() {
         jsonOutput(['error' => '账号已被管理员限制登录。理由：' . $reason], 403);
     }
 
+    // 两步验证：先校验密码，再进入第二步（不在此时建立完整登录态）
+    if (!empty($user['totp_enabled'])) {
+        // 老客户端没有 2FA 逻辑：返回明确提示，避免前端拿到空 user 报错
+        if ((string)($input['client_2fa'] ?? '') !== '1') {
+            jsonOutput(['error' => '该账号已启用两步验证，请刷新页面（Ctrl+F5）后重新登录', 'need_refresh' => true], 401);
+        }
+        startSession();
+        regenerateSession();
+        $_SESSION['2fa_pending_user_id'] = (int)$user['id'];
+        $_SESSION['2fa_pending_time'] = time();
+        $_SESSION['2fa_pending_challenge'] = bin2hex(random_bytes(16));
+        $_SESSION['2fa_pending_attempts'] = 0;
+        jsonOutput([
+            'ok' => false,
+            'need_2fa' => true,
+            'challenge' => $_SESSION['2fa_pending_challenge'],
+            'username' => $user['username'],
+            'expires_in' => TWOFA_PENDING_TTL,
+        ]);
+    }
+
     startSession();
     // 防止会话固定攻击：登录成功后重新生成 session ID
     regenerateSession();
 
-    $_SESSION['user_id']   = (int)$user['id'];
-    $_SESSION['username']  = $user['username'];
-    $_SESSION['roles']     = normalizeRoles($user['roles']);
-    $_SESSION['is_guest']  = false;
-
-    // 生成 CSRF token
-    generateCsrfToken();
+    $payload = twofaApplyLoginSession($user);
 
     try { addLoginHistory((int)$user['id'], $user['username'], 'password', true, '', $input['fingerprint'] ?? ''); } catch (\Exception $e) {}
-    try { addLog($_SESSION['user_id'], $user['username'], 'login', 'system', null, '用户登录'); } catch (\Exception $e) {}
+    try { addLog((int)$user['id'], $user['username'], 'login', 'system', null, '用户登录'); } catch (\Exception $e) {}
 
-    jsonOutput([
-        'ok'   => true,
-        'user' => [
-            'id'         => (int)$user['id'],
-            'username'   => $user['username'],
-            'roles'      => $_SESSION['roles'],
-            'csrf_token' => $_SESSION['csrf_token'],
-        ]
-    ]);
+    jsonOutput(['ok' => true, 'user' => $payload]);
 }
 
 // ==================== 访客登录 ====================
@@ -78,6 +85,10 @@ function handleGuestLogin() {
     $_SESSION['username']  = '同学（访客）';
     $_SESSION['roles']     = ['student'];
     $_SESSION['is_guest']  = true;
+    $_SESSION['roster_id'] = 0;
+    $_SESSION['student_name'] = '';
+    $_SESSION['totp_enabled'] = false;
+    $_SESSION['must_change_password'] = false;
 
     generateCsrfToken();
 
@@ -129,7 +140,8 @@ function handleChangePassword() {
     if (!$row || !password_verify($oldPass, $row['password'])) jsonOutput(['error' => '旧密码错误'], 401);
 
     $hash = password_hash($newPass, PASSWORD_BCRYPT);
-    db()->prepare("UPDATE users SET password=:p WHERE id=:id")->execute([':p' => $hash, ':id' => $user['id']]);
+    db()->prepare("UPDATE users SET password=:p, must_change_password=0 WHERE id=:id")->execute([':p' => $hash, ':id' => $user['id']]);
+    $_SESSION['must_change_password'] = false;
     addLog($user['id'], $user['username'], 'change_password', 'user', $user['id']);
 
     jsonOutput(['ok' => true]);
@@ -150,16 +162,32 @@ function handleMe() {
                 'highest_role' => 'student',
                 'is_guest'     => true,
                 'created_at'   => null,
+                'roster_id'    => 0,
+                'student_name' => '',
+                'totp_enabled' => false,
+                'must_change_password' => false,
                 'csrf_token'   => $_SESSION['csrf_token'] ?? '',
             ]
         ]);
     }
 
-    $stmt = db()->prepare("SELECT username, roles, created_at FROM users WHERE id = :id");
+    $stmt = db()->prepare("SELECT username, roles, created_at, roster_id, must_change_password, totp_enabled FROM users WHERE id = :id");
     $stmt->execute([':id' => $user['id']]);
     $row = $stmt->fetch();
     if (!$row) {
         jsonOutput(['error' => '用户不存在'], 404);
+    }
+
+    // 同步会话里的账号安全状态（管理员重置密码/开启 2FA 后无需重新登录即可反映）
+    $_SESSION['roster_id'] = (int)($row['roster_id'] ?? 0);
+    $_SESSION['must_change_password'] = !empty($row['must_change_password']);
+    $_SESSION['totp_enabled'] = !empty($row['totp_enabled']);
+    $studentName = '';
+    if ((int)($_SESSION['roster_id']) > 0) {
+        $sn = db()->prepare("SELECT name FROM class_roster WHERE id=:id");
+        $sn->execute([':id' => (int)$_SESSION['roster_id']]);
+        $studentName = (string)$sn->fetchColumn();
+        $_SESSION['student_name'] = $studentName;
     }
 
     $roles = sortRolesByPriority(normalizeRoles($row['roles']));
@@ -170,6 +198,10 @@ function handleMe() {
             'roles'        => $roles,
             'highest_role' => getHighestRole($roles),
             'created_at'   => $row['created_at'],
+            'roster_id'    => (int)($_SESSION['roster_id'] ?? 0),
+            'student_name' => $studentName,
+            'totp_enabled' => !empty($row['totp_enabled']),
+            'must_change_password' => !empty($row['must_change_password']),
             'csrf_token'   => $_SESSION['csrf_token'] ?? '',
         ]
     ]);

@@ -3,21 +3,21 @@
  * 班级班费管理系统 - 学期汇总报表模块
  * 按学期汇总收支、分类占比、月度趋势、班费收缴情况
  */
+require_once __DIR__ . '/semesters.php';
 
 /** 构建报表数据（供页面展示与 Excel 导出共用） */
 function buildReportData(array $params): array {
     // 优先使用用户自定义学期（semesters 表），保证报表与学期管理数据一致
     $sid = intval($params['semester_id'] ?? 0);
+    $sem = null;
     if ($sid > 0) {
-        $stmt = db()->prepare("SELECT * FROM semesters WHERE id=:id");
-        $stmt->execute([':id' => $sid]);
-        $sem = $stmt->fetch();
+        $sem = semesterById($sid);
         if (!$sem) jsonOutput(['error' => '学期不存在'], 404);
-        $start = $sem['start_date'];
-        $end = $sem['end_date'];
+        $start = (string)$sem['start_date'];
+        $end = (string)$sem['end_date'];
         $year = (int)substr($start, 0, 4);
         $semester = 'custom';
-        $label = $sem['name'];
+        $label = (string)$sem['name'];
         $custom = true;
     } else {
         // 回退：内置固定学期范围（可被自定义 start/end 覆盖）
@@ -41,77 +41,147 @@ function buildReportData(array $params): array {
         if ($custom) $label = "{$start} ~ {$end}";
     }
 
-    // 期初余额（学期开始前累计净额）
-    $begin = db()->prepare("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE -amount END),0)
-        FROM transactions WHERE deleted_at IS NULL AND date < :s");
-    $begin->execute([':s' => $start]);
-    $beginBalance = round((float)$begin->fetchColumn(), 2);
+    $snapshot = [];
+    if ($sem && !empty($sem['snapshot_json'])) {
+        $decoded = json_decode((string)$sem['snapshot_json'], true);
+        if (is_array($decoded)) $snapshot = $decoded;
+    }
+    $frozen = $sem && $sem['status'] === 'archived'
+        && $sem['opening_balance'] !== null && $sem['closing_balance'] !== null;
 
-    // 期内收支汇总
-    $sum = db()->prepare("SELECT
-        COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) AS income,
-        COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense,
-        COALESCE(SUM(CASE WHEN type='income' THEN 1 ELSE 0 END),0) AS income_count,
-        COALESCE(SUM(CASE WHEN type='expense' THEN 1 ELSE 0 END),0) AS expense_count
-        FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e");
-    $sum->execute([':s' => $start, ':e' => $end]);
-    $row = $sum->fetch();
+    // 期初余额：优先使用结转/归档时冻结的 opening_balance
+    if ($sem && $sem['opening_balance'] !== null) {
+        $beginBalance = round((float)$sem['opening_balance'], 2);
+    } else {
+        $begin = db()->prepare("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE -amount END),0)
+            FROM transactions WHERE deleted_at IS NULL AND date < :s");
+        $begin->execute([':s' => $start]);
+        $beginBalance = round((float)$begin->fetchColumn(), 2);
+    }
 
-    $totalIncome  = round((float)$row['income'], 2);
-    $totalExpense = round((float)$row['expense'], 2);
-    $balance      = round($beginBalance + $totalIncome - $totalExpense, 2);
+    if ($frozen) {
+        $totalIncome  = round((float)$sem['total_income'], 2);
+        $totalExpense = round((float)$sem['total_expense'], 2);
+        $incomeCount  = (int)($snapshot['income_count'] ?? 0);
+        $expenseCount = (int)($snapshot['expense_count'] ?? 0);
+        $byCategory   = is_array($snapshot['by_category'] ?? null) ? $snapshot['by_category'] : [];
+        $byMonth      = is_array($snapshot['by_month'] ?? null) ? $snapshot['by_month'] : [];
+        $expectedAmount = round((float)$sem['pay_expected'], 2);
+        $collectedAmount = round((float)$sem['pay_collected'], 2);
+        $collectRate = $sem['pay_rate'] !== null ? round((float)$sem['pay_rate'], 1) : ($expectedAmount > 0 ? round($collectedAmount / $expectedAmount * 100, 1) : 0);
+        $rounds = (int)($snapshot['pay_rounds'] ?? 0);
+        $balance = round((float)$sem['closing_balance'], 2);
 
-    // 班费收缴情况
-    $pay = db()->prepare("SELECT
-        COALESCE(SUM(expected_amount),0) AS expected,
-        COALESCE(SUM(amount),0) AS collected,
-        COUNT(*) AS rounds
-        FROM transactions
-        WHERE type='income' AND sub_category='班费收缴' AND deleted_at IS NULL AND date BETWEEN :s AND :e");
-    $pay->execute([':s' => $start, ':e' => $end]);
-    $payRow = $pay->fetch();
-    $expectedAmount  = round((float)$payRow['expected'], 2);
-    $collectedAmount = round((float)$payRow['collected'], 2);
-    $collectRate = $expectedAmount > 0 ? round($collectedAmount / $expectedAmount * 100, 1) : 0;
+        // 旧归档数据没有完整快照：计数/轮次回退实时查询
+        if (!isset($snapshot['income_count']) || !isset($snapshot['pay_rounds'])) {
+            $cnt = db()->prepare("SELECT
+                COALESCE(SUM(CASE WHEN type='income' THEN 1 ELSE 0 END),0) AS ic,
+                COALESCE(SUM(CASE WHEN type='expense' THEN 1 ELSE 0 END),0) AS ec
+                FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e");
+            $cnt->execute([':s' => $start, ':e' => $end]);
+            $cntRow = $cnt->fetch() ?: ['ic' => 0, 'ec' => 0];
+            if (!isset($snapshot['income_count'])) $incomeCount = (int)$cntRow['ic'];
+            if (!isset($snapshot['expense_count'])) $expenseCount = (int)$cntRow['ec'];
+            if (!isset($snapshot['pay_rounds'])) {
+                $rc = db()->prepare("SELECT COUNT(*) FROM transactions
+                    WHERE type='income' AND sub_category='班费收缴' AND deleted_at IS NULL AND date BETWEEN :s AND :e");
+                $rc->execute([':s' => $start, ':e' => $end]);
+                $rounds = (int)$rc->fetchColumn();
+            }
+        }
 
-    // 分类汇总
-    $cat = db()->prepare("SELECT type, category, COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt
-        FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e
-        GROUP BY type, category ORDER BY total DESC");
-    $cat->execute([':s' => $start, ':e' => $end]);
-    $byCategory = $cat->fetchAll();
+        // 旧归档数据没有快照分类/月度：回退实时查询
+        if (empty($byCategory) || empty($byMonth)) {
+            $cat = db()->prepare("SELECT type, category, COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt
+                FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e
+                GROUP BY type, category ORDER BY total DESC");
+            $cat->execute([':s' => $start, ':e' => $end]);
+            if (empty($byCategory)) $byCategory = $cat->fetchAll();
+            $mon = db()->prepare("SELECT DATE_FORMAT(date,'%Y-%m') AS month,
+                COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) AS income,
+                COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense
+                FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e
+                GROUP BY DATE_FORMAT(date,'%Y-%m') ORDER BY month");
+            $mon->execute([':s' => $start, ':e' => $end]);
+            if (empty($byMonth)) $byMonth = $mon->fetchAll();
+        }
+    } else {
+        // 期内收支汇总
+        $sum = db()->prepare("SELECT
+            COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) AS income,
+            COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense,
+            COALESCE(SUM(CASE WHEN type='income' THEN 1 ELSE 0 END),0) AS income_count,
+            COALESCE(SUM(CASE WHEN type='expense' THEN 1 ELSE 0 END),0) AS expense_count
+            FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e");
+        $sum->execute([':s' => $start, ':e' => $end]);
+        $row = $sum->fetch();
+
+        $totalIncome  = round((float)$row['income'], 2);
+        $totalExpense = round((float)$row['expense'], 2);
+        $balance      = round($beginBalance + $totalIncome - $totalExpense, 2);
+        $incomeCount  = (int)$row['income_count'];
+        $expenseCount = (int)$row['expense_count'];
+
+        // 班费收缴情况
+        $pay = db()->prepare("SELECT
+            COALESCE(SUM(expected_amount),0) AS expected,
+            COALESCE(SUM(amount),0) AS collected,
+            COUNT(*) AS rounds
+            FROM transactions
+            WHERE type='income' AND sub_category='班费收缴' AND deleted_at IS NULL AND date BETWEEN :s AND :e");
+        $pay->execute([':s' => $start, ':e' => $end]);
+        $payRow = $pay->fetch();
+        $expectedAmount  = round((float)$payRow['expected'], 2);
+        $collectedAmount = round((float)$payRow['collected'], 2);
+        $collectRate = $expectedAmount > 0 ? round($collectedAmount / $expectedAmount * 100, 1) : 0;
+        $rounds = (int)$payRow['rounds'];
+
+        // 分类汇总
+        $cat = db()->prepare("SELECT type, category, COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt
+            FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e
+            GROUP BY type, category ORDER BY total DESC");
+        $cat->execute([':s' => $start, ':e' => $end]);
+        $byCategory = $cat->fetchAll();
+
+        // 月度趋势
+        $mon = db()->prepare("SELECT DATE_FORMAT(date,'%Y-%m') AS month,
+            COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) AS income,
+            COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense
+            FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e
+            GROUP BY DATE_FORMAT(date,'%Y-%m') ORDER BY month");
+        $mon->execute([':s' => $start, ':e' => $end]);
+        $byMonth = $mon->fetchAll();
+    }
+
     foreach ($byCategory as &$c) { $c['total'] = round((float)$c['total'], 2); }
-
-    // 月度趋势
-    $mon = db()->prepare("SELECT DATE_FORMAT(date,'%Y-%m') AS month,
-        COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE 0 END),0) AS income,
-        COALESCE(SUM(CASE WHEN type='expense' THEN amount ELSE 0 END),0) AS expense
-        FROM transactions WHERE deleted_at IS NULL AND date BETWEEN :s AND :e
-        GROUP BY DATE_FORMAT(date,'%Y-%m') ORDER BY month");
-    $mon->execute([':s' => $start, ':e' => $end]);
-    $byMonth = $mon->fetchAll();
+    unset($c);
     foreach ($byMonth as &$m) {
         $m['income']  = round((float)$m['income'], 2);
         $m['expense'] = round((float)$m['expense'], 2);
-        $m['net']     = round((float)$m['income'] - (float)$m['expense'], 2);
+        $m['net']     = round($m['income'] - $m['expense'], 2);
     }
+    unset($m);
 
     return [
         'period'  => [
             'start' => $start, 'end' => $end, 'label' => $label,
             'year' => $year, 'semester' => $semester, 'custom' => $custom,
+            'semester_id' => $sem ? (int)$sem['id'] : 0,
+            'frozen' => (bool)$frozen,
+            'snapshot_dirty' => $sem ? (int)($sem['snapshot_dirty'] ?? 0) : 0,
+            'archived_at' => $sem['archived_at'] ?? null,
         ],
         'summary' => [
             'begin_balance'   => $beginBalance,
             'total_income'    => $totalIncome,
             'total_expense'   => $totalExpense,
             'balance'         => $balance,
-            'income_count'    => (int)$row['income_count'],
-            'expense_count'   => (int)$row['expense_count'],
+            'income_count'    => (int)$incomeCount,
+            'expense_count'   => (int)$expenseCount,
             'expected_amount' => $expectedAmount,
             'collected_amount'=> $collectedAmount,
             'collect_rate'    => $collectRate,
-            'rounds'          => (int)$payRow['rounds'],
+            'rounds'          => (int)$rounds,
         ],
         'by_category' => $byCategory,
         'by_month'    => $byMonth,
@@ -249,15 +319,23 @@ function handleSemesters(string $method) {
     switch ($method) {
         case 'GET':
             requirePermission('viewTransactions');
-            $rows = db()->query("SELECT * FROM semesters ORDER BY start_date DESC, id DESC")->fetchAll();
-            foreach ($rows as &$s) {
-                $s['begin_balance'] = balanceBefore($s['start_date']);
-                // 期末余额 = 期末日期（含）前的累计余额
-                $stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount ELSE -amount END),0) FROM transactions WHERE deleted_at IS NULL AND date <= :d");
-                $stmt->execute([':d' => $s['end_date']]);
-                $s['end_balance'] = round((float)$stmt->fetchColumn(), 2);
+            $rows = semesterAll();
+            $out = [];
+            foreach ($rows as $s) {
+                $frozen = ($s['status'] === 'archived' && $s['opening_balance'] !== null && $s['closing_balance'] !== null);
+                $begin = ($s['opening_balance'] !== null) ? (float)$s['opening_balance'] : semesterBalanceBefore((string)$s['start_date']);
+                $endBal = $frozen ? (float)$s['closing_balance'] : semesterBalanceThrough((string)$s['end_date']);
+                $liveEnd = semesterBalanceThrough((string)$s['end_date']);
+                $s['begin_balance'] = round($begin, 2);
+                $s['end_balance'] = round($endBal, 2);
+                $s['live_begin_balance'] = semesterBalanceBefore((string)$s['start_date']);
+                $s['live_end_balance'] = $liveEnd;
+                $s['frozen'] = $frozen;
+                $s['snapshot_dirty'] = (int)($s['snapshot_dirty'] ?? 0);
+                $s['stale'] = $frozen && (abs($liveEnd - $endBal) > 0.009);
+                $out[] = $s;
             }
-            jsonOutput(['semesters' => $rows]);
+            jsonOutput(['semesters' => $out]);
             break;
 
         case 'POST':
@@ -267,6 +345,7 @@ function handleSemesters(string $method) {
             if ((int)(currentUser()['id'] ?? 0) === 0) jsonOutput(['error' => '访客无权重学期'], 403);
             $input = jsonInput();
             $action = $input['action'] ?? '';
+            $user = currentUser();
 
             if ($action === 'create') {
                 // 新建学期：班主任 / 管理员 / 班长
@@ -275,12 +354,15 @@ function handleSemesters(string $method) {
                 $start = $input['start_date'] ?? '';
                 $end = $input['end_date'] ?? '';
                 if (empty($name)) jsonOutput(['error' => '请填写学期名称'], 400);
+                if (mb_strlen($name) > 50) jsonOutput(['error' => '学期名称不能超过 50 个字符'], 400);
                 if (!isValidDate($start) || !isValidDate($end)) jsonOutput(['error' => '日期格式无效'], 400);
                 if ($start > $end) jsonOutput(['error' => '开始日期不能晚于结束日期'], 400);
 
                 $dup = db()->prepare("SELECT COUNT(*) FROM semesters WHERE name=:n");
                 $dup->execute([':n' => $name]);
                 if ((int)$dup->fetchColumn() > 0) jsonOutput(['error' => '已存在同名学期「' . $name . '」，请换一个名称'], 400);
+                $overlap = semesterOverlap($start, $end);
+                if ($overlap) jsonOutput(['error' => '日期与已有学期「' . $overlap['name'] . '」重叠，请调整起止日期'], 400);
 
                 try {
                     db()->prepare("INSERT INTO semesters (name, start_date, end_date) VALUES (:n, :s, :e)")
@@ -288,19 +370,114 @@ function handleSemesters(string $method) {
                 } catch (\Exception $e) {
                     jsonOutput(['error' => '学期创建失败：' . $e->getMessage()], 400);
                 }
-                $user = currentUser();
-                addLog($user['id'], $user['username'], 'create_semester', 'semester', (int)db()->lastInsertId(), ['name' => $name]);
-                jsonOutput(['ok' => true]);
+                $id = (int)db()->lastInsertId();
+                semesterAssignRange($id, $start, $end);
+                addLog($user['id'], $user['username'], 'create_semester', 'semester', $id, ['name' => $name]);
+                jsonOutput(['ok' => true, 'semester' => semesterById($id)]);
+            }
+
+            if ($action === 'update') {
+                requirePermission('manageAllAccounts');
+                $id = intval($input['id'] ?? 0);
+                $sem = semesterById($id);
+                if (!$sem) jsonOutput(['error' => '学期不存在'], 404);
+                if ($sem['status'] !== 'active') jsonOutput(['error' => '已归档学期不可修改，请先取消归档'], 400);
+                $name = trim($input['name'] ?? $sem['name']);
+                $start = $input['start_date'] ?? $sem['start_date'];
+                $end = $input['end_date'] ?? $sem['end_date'];
+                if ($name === '') jsonOutput(['error' => '请填写学期名称'], 400);
+                if (mb_strlen($name) > 50) jsonOutput(['error' => '学期名称不能超过 50 个字符'], 400);
+                if (!isValidDate($start) || !isValidDate($end)) jsonOutput(['error' => '日期格式无效'], 400);
+                if ($start > $end) jsonOutput(['error' => '开始日期不能晚于结束日期'], 400);
+                $dup = db()->prepare("SELECT id FROM semesters WHERE name=:n AND id<>:id");
+                $dup->execute([':n' => $name, ':id' => $id]);
+                if ($dup->fetch()) jsonOutput(['error' => '已存在同名学期'], 400);
+                $overlap = semesterOverlap($start, $end, $id);
+                if ($overlap) jsonOutput(['error' => '日期与已有学期「' . $overlap['name'] . '」重叠'], 400);
+                db()->prepare("UPDATE semesters SET name=:n, start_date=:s, end_date=:e WHERE id=:id")
+                    ->execute([':n' => $name, ':s' => $start, ':e' => $end, ':id' => $id]);
+                // 重新归属：区间内补齐；区间外解除本学期的归属
+                semesterAssignRange($id, $start, $end);
+                db()->prepare("UPDATE transactions SET semester_id=NULL WHERE semester_id=:id AND (date<:s OR date>:e)")
+                    ->execute([':id' => $id, ':s' => $start, ':e' => $end]);
+                addLog($user['id'], $user['username'], 'update_semester', 'semester', $id, ['name' => $name, 'start' => $start, 'end' => $end]);
+                jsonOutput(['ok' => true, 'semester' => semesterById($id)]);
             }
 
             if ($action === 'archive') {
-                // 结转归档仍限 班主任 / 管理员
                 requirePermission('manageAllAccounts');
                 $id = intval($input['id'] ?? 0);
-                if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
-                db()->prepare("UPDATE semesters SET status='archived' WHERE id=:id AND status='active'")->execute([':id' => $id]);
-                $user = currentUser();
-                addLog($user['id'], $user['username'], 'archive_semester', 'semester', $id);
+                $sem = semesterById($id);
+                if (!$sem) jsonOutput(['error' => '学期不存在'], 404);
+                if ($sem['status'] !== 'active') jsonOutput(['error' => '该学期已归档'], 400);
+
+                $createNext = !empty($input['create_next']);
+                if ($createNext) {
+                    $nextName = trim((string)($input['next_name'] ?? ''));
+                    $nextStart = (string)($input['next_start'] ?? '');
+                    $nextEnd = (string)($input['next_end'] ?? '');
+                    if ($nextName === '') jsonOutput(['error' => '请填写下一学期名称'], 400);
+                    if (!isValidDate($nextStart) || !isValidDate($nextEnd)) jsonOutput(['error' => '下一学期日期格式无效'], 400);
+                    if ($nextStart > $nextEnd) jsonOutput(['error' => '下一学期开始日期不能晚于结束日期'], 400);
+                    if ($nextStart <= (string)$sem['end_date']) jsonOutput(['error' => '下一学期开始日期必须晚于当前学期结束日期'], 400);
+                    $dup = db()->prepare("SELECT id FROM semesters WHERE name=:n");
+                    $dup->execute([':n' => $nextName]);
+                    if ($dup->fetch()) jsonOutput(['error' => '已存在同名学期「' . $nextName . '」'], 400);
+                    $overlap = semesterOverlap($nextStart, $nextEnd);
+                    if ($overlap) jsonOutput(['error' => '下一学期日期与已有学期「' . $overlap['name'] . '」重叠'], 400);
+                }
+
+                semesterAssignRange($id, (string)$sem['start_date'], (string)$sem['end_date']);
+                $archived = semesterApplySnapshot($id, (int)$user['id'], true);
+                $next = null;
+                if ($createNext) {
+                    try {
+                        $next = semesterCreateNext($archived ?? $sem, $input, (int)$user['id']);
+                    } catch (\Exception $e) {
+                        addLog($user['id'], $user['username'], 'archive_semester', 'semester', $id, ['warning' => 'next_create_failed', 'error' => $e->getMessage()]);
+                        jsonOutput(['error' => '本学期已归档，但下一学期创建失败：' . $e->getMessage()], 500);
+                    }
+                }
+                addLog($user['id'], $user['username'], 'archive_semester', 'semester', $id, ['name' => $sem['name'], 'next' => $next['id'] ?? 0]);
+                jsonOutput(['ok' => true, 'semester' => $archived, 'next' => $next]);
+            }
+
+            if ($action === 'rearchive') {
+                requirePermission('manageAllAccounts');
+                $id = intval($input['id'] ?? 0);
+                $sem = semesterById($id);
+                if (!$sem) jsonOutput(['error' => '学期不存在'], 404);
+                if ($sem['status'] !== 'archived') jsonOutput(['error' => '仅已归档学期需要重新结账'], 400);
+                $row = semesterApplySnapshot($id, (int)$user['id'], true);
+                addLog($user['id'], $user['username'], 'rearchive_semester', 'semester', $id);
+                jsonOutput(['ok' => true, 'semester' => $row]);
+            }
+
+            if ($action === 'unarchive') {
+                requirePermission('manageAllAccounts');
+                $id = intval($input['id'] ?? 0);
+                $sem = semesterById($id);
+                if (!$sem) jsonOutput(['error' => '学期不存在'], 404);
+                if ($sem['status'] !== 'archived') jsonOutput(['error' => '该学期未归档'], 400);
+                // 取消归档后恢复实时计算：清空冻结快照与期初/期末，避免报表继续用旧快照
+                db()->prepare("UPDATE semesters SET status='active', archived_at=NULL, archived_by=NULL, snapshot_dirty=0,
+                    opening_balance=NULL, closing_balance=NULL, total_income=NULL, total_expense=NULL,
+                    tx_count=NULL, pay_expected=NULL, pay_collected=NULL, pay_rate=NULL, snapshot_json=NULL
+                    WHERE id=:id")->execute([':id' => $id]);
+                addLog($user['id'], $user['username'], 'unarchive_semester', 'semester', $id);
+                jsonOutput(['ok' => true, 'semester' => semesterById($id)]);
+            }
+
+            if ($action === 'delete') {
+                requirePermission('manageAllAccounts');
+                $id = intval($input['id'] ?? 0);
+                $sem = semesterById($id);
+                if (!$sem) jsonOutput(['error' => '学期不存在'], 404);
+                $cnt = db()->prepare("SELECT COUNT(*) FROM transactions WHERE semester_id=:id");
+                $cnt->execute([':id' => $id]);
+                if ((int)$cnt->fetchColumn() > 0) jsonOutput(['error' => '该学期下还有收支记录，不能删除；可先调整日期或取消归属'], 400);
+                db()->prepare("DELETE FROM semesters WHERE id=:id")->execute([':id' => $id]);
+                addLog($user['id'], $user['username'], 'delete_semester', 'semester', $id, ['name' => $sem['name']]);
                 jsonOutput(['ok' => true]);
             }
 
