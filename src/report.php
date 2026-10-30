@@ -261,7 +261,7 @@ function handleSemesters(string $method) {
             break;
 
         case 'POST':
-            requirePermission('manageAllAccounts');
+            requireLogin();
             requireCsrfToken();
             // 访客（id=0）即使权限被误配也不允许改动学期
             if ((int)(currentUser()['id'] ?? 0) === 0) jsonOutput(['error' => '访客无权重学期'], 403);
@@ -269,6 +269,8 @@ function handleSemesters(string $method) {
             $action = $input['action'] ?? '';
 
             if ($action === 'create') {
+                // 新建学期：班主任 / 管理员 / 班长
+                requirePermission('createSemester');
                 $name = trim($input['name'] ?? '');
                 $start = $input['start_date'] ?? '';
                 $end = $input['end_date'] ?? '';
@@ -276,14 +278,24 @@ function handleSemesters(string $method) {
                 if (!isValidDate($start) || !isValidDate($end)) jsonOutput(['error' => '日期格式无效'], 400);
                 if ($start > $end) jsonOutput(['error' => '开始日期不能晚于结束日期'], 400);
 
-                db()->prepare("INSERT INTO semesters (name, start_date, end_date) VALUES (:n, :s, :e)")
-                    ->execute([':n' => $name, ':s' => $start, ':e' => $end]);
+                $dup = db()->prepare("SELECT COUNT(*) FROM semesters WHERE name=:n");
+                $dup->execute([':n' => $name]);
+                if ((int)$dup->fetchColumn() > 0) jsonOutput(['error' => '已存在同名学期「' . $name . '」，请换一个名称'], 400);
+
+                try {
+                    db()->prepare("INSERT INTO semesters (name, start_date, end_date) VALUES (:n, :s, :e)")
+                        ->execute([':n' => $name, ':s' => $start, ':e' => $end]);
+                } catch (\Exception $e) {
+                    jsonOutput(['error' => '学期创建失败：' . $e->getMessage()], 400);
+                }
                 $user = currentUser();
                 addLog($user['id'], $user['username'], 'create_semester', 'semester', (int)db()->lastInsertId(), ['name' => $name]);
                 jsonOutput(['ok' => true]);
             }
 
             if ($action === 'archive') {
+                // 结转归档仍限 班主任 / 管理员
+                requirePermission('manageAllAccounts');
                 $id = intval($input['id'] ?? 0);
                 if ($id <= 0) jsonOutput(['error' => '无效 ID'], 400);
                 db()->prepare("UPDATE semesters SET status='archived' WHERE id=:id AND status='active'")->execute([':id' => $id]);

@@ -105,6 +105,8 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     .wave{display:inline-block;}
     </style>
     <link rel="stylesheet" href="assets/css/style.css?v=17" onerror="window.__retryResource(this,'assets/css/style.css?v=17')">
+    <!-- 移动端优化 + 收支详情 / 凭证查看 -->
+    <link rel="stylesheet" href="assets/css/mobile.css?v=2">
     <style data-cfasync="false">
     /* 弹窗可读性修复：登录页表单样式不应影响弹窗（此前导致弹窗文字过淡/看不见） */
     .modal label{color:var(--text);}
@@ -121,7 +123,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     </script>
     <!-- 预加载关键资源：提前建立连接/加载JS，减少等待 -->
     <link rel="preload" href="assets/css/style.css?v=17" as="style">
-    <link rel="preload" href="assets/js/app.js?v=41" as="script">
+    <link rel="preload" href="assets/js/app.js?v=43" as="script">
     <link rel="preconnect" href="/" crossorigin>
     <script data-cfasync="false">
     // 防止 app.js 未就绪时点击登录报错：按钮先禁用，JS 加载后启用
@@ -926,7 +928,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=41" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=41')"></script>
+    <script src="assets/js/app.js?v=43" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=43')"></script>
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
     <script src="assets/js/security.js?v=5" defer data-cfasync="false"></script>
     <!-- 在线支付面板（v1.8.1） -->
@@ -935,6 +937,8 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <script src="assets/js/tabs.js?v=2" defer data-cfasync="false"></script>
     <!-- 收支弹窗「班费收缴」简化模式 -->
     <script src="assets/js/modal-tx.js?v=3" defer data-cfasync="false"></script>
+    <!-- 移动端优化：收支详情 + 发票/图片凭证查看（依赖 app.js） -->
+    <script src="assets/js/mobile.js?v=2" defer data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">

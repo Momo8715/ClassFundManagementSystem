@@ -424,7 +424,7 @@ function handlePayConfigSave() {
 function handlePayMeta() {
     requireLogin();
     $cfg = getPayConfig();
-    $roster = db()->query("SELECT id, name, exempt FROM class_roster ORDER BY id")->fetchAll();
+    $roster = db()->query("SELECT id, name, exempt FROM class_roster ORDER BY sort_key, id")->fetchAll();
     $rounds = db()->query("SELECT id, date, description, amount, expected_amount, per_person FROM transactions
         WHERE type='income' AND sub_category='班费收缴' AND deleted_at IS NULL
         ORDER BY date DESC, id DESC LIMIT 100")->fetchAll();

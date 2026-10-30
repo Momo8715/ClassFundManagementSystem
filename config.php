@@ -190,6 +190,7 @@ function autoMigrate(): void {
         $db->exec("CREATE TABLE IF NOT EXISTS class_roster (
             id INT AUTO_INCREMENT PRIMARY KEY,
             name VARCHAR(50) NOT NULL,
+            sort_key VARBINARY(255) DEFAULT NULL COMMENT '拼音排序键（ICU zh_CN）',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uk_name (name)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='班级学生名单'");
@@ -197,6 +198,28 @@ function autoMigrate(): void {
         // class_roster.exempt 豁免缴费
         $rCols = $db->query("SHOW COLUMNS FROM class_roster")->fetchAll(PDO::FETCH_COLUMN);
         if (!in_array('exempt', $rCols)) $db->exec("ALTER TABLE class_roster ADD COLUMN exempt TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否免缴' AFTER name");
+
+        // class_roster.sort_key 拼音排序键（v1.16 引入，v1.17 改为 Hex 文本）：
+        // 查询直接 ORDER BY sort_key，任何入口都自动 A-Z
+        try {
+            // v1.17/v1.18 修正：早期二进制 sort_key 不是合法 UTF-8，会被 SELECT * 带进 json_encode 导致接口空响应。
+            // 旧列无法直接 MODIFY（Incorrect string value），必须删列重建。
+            $skType = strtolower((string)$db->query("SELECT DATA_TYPE FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='class_roster' AND COLUMN_NAME='sort_key'")->fetchColumn());
+            if ($skType === '') {
+                $db->exec("ALTER TABLE class_roster ADD COLUMN sort_key VARCHAR(512) DEFAULT NULL COMMENT '拼音排序键（Hex，字典序=拼音序）' AFTER exempt");
+            } elseif ($skType !== 'varchar') {
+                $db->exec("ALTER TABLE class_roster DROP COLUMN sort_key");
+                $db->exec("ALTER TABLE class_roster ADD COLUMN sort_key VARCHAR(512) DEFAULT NULL COMMENT '拼音排序键（Hex，字典序=拼音序）' AFTER exempt");
+            }
+            $needKey = $db->query("SELECT id, name FROM class_roster WHERE sort_key IS NULL OR sort_key = ''")->fetchAll();
+            if ($needKey) {
+                $updKey = $db->prepare("UPDATE class_roster SET sort_key=:k WHERE id=:id");
+                foreach ($needKey as $row) {
+                    $updKey->execute([':k' => rosterSortKey((string)$row['name']), ':id' => (int)$row['id']]);
+                }
+            }
+        } catch (\Exception $e) { /* 忽略，下次请求重试 */ }
 
         // transactions.payer_ids 缴费学生
         $cols = $db->query("SHOW COLUMNS FROM transactions")->fetchAll(PDO::FETCH_COLUMN);
@@ -362,7 +385,7 @@ define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
 // 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
 // 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
-define('SCHEMA_VERSION', '1.15');
+define('SCHEMA_VERSION', '1.18');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([
@@ -414,6 +437,7 @@ define('PERMISSIONS', json_encode([
     'importData'        => ['head_teacher','admin','monitor','vice_monitor','finance'],
     'manageStudents'    => ['head_teacher','admin','monitor','vice_monitor'],
     'manageAllAccounts' => ['head_teacher','admin'],
+    'createSemester'    => ['head_teacher','admin','monitor'],   // 新建学期：班主任 / 管理员 / 班长
     'viewLogs'          => ['head_teacher','admin'],
     'viewSecurity'      => ['admin'],
     'manageRoster'      => ['head_teacher','admin','monitor','vice_monitor'],

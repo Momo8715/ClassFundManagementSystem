@@ -88,8 +88,10 @@ CREATE TABLE IF NOT EXISTS `class_roster` (
   `id`         INT AUTO_INCREMENT PRIMARY KEY,
   `name`       VARCHAR(50) NOT NULL,
   `exempt`     TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否免缴',
+  `sort_key`   VARCHAR(512) DEFAULT NULL COMMENT '拼音排序键（Hex，字典序=拼音序）',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY `uk_name` (`name`)
+  UNIQUE KEY `uk_name` (`name`),
+  KEY `idx_sort` (`sort_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='班级学生名单';
 
 -- 学期管理

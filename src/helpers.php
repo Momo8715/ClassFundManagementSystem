@@ -231,3 +231,106 @@ function contentDisposition(string $filename): string {
     return 'attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($filename);
 }
 
+
+// ========== 花名册拼音首字母排序（A-Z） ==========
+/** 单个汉字的拼音首字母（GB2312 一级汉字区位表）；非汉字/无法识别返回 '' */
+function pinyinInitialOfChar(string $ch): string {
+    if ($ch === '') return '';
+    // GB2312 二级汉字不按拼音排序，这里补上常用姓名用字的拼音首字母
+    static $extra = [
+        '闵'=>'M','闫'=>'Y','覃'=>'Q','邬'=>'W','臧'=>'Z','佘'=>'S','芮'=>'R','竺'=>'Z','郗'=>'X','逯'=>'L','綦'=>'Q',
+        '琪'=>'Q','琇'=>'X','玥'=>'Y','珅'=>'S','琛'=>'C','睿'=>'R','淼'=>'M','犇'=>'B','垚'=>'Y','焱'=>'Y','燊'=>'S',
+        '頔'=>'D','骁'=>'X','骅'=>'H','晟'=>'S','晞'=>'X','晗'=>'H','萱'=>'X','薇'=>'W','婧'=>'J','娅'=>'Y','娣'=>'D',
+        '烨'=>'Y','熠'=>'Y','琰'=>'Y','瑄'=>'X','玺'=>'X','梓'=>'Z','楠'=>'N','槿'=>'J','樾'=>'Y','歆'=>'X','潼'=>'T',
+        '瀛'=>'Y','潇'=>'X','灏'=>'H','昀'=>'Y','昱'=>'Y','晖'=>'H','曦'=>'X','淦'=>'G','鑫'=>'X','喆'=>'Z','昶'=>'C',
+        '旻'=>'M','晔'=>'Y','渼'=>'M','煊'=>'X','珺'=>'J','璟'=>'J','璐'=>'L','筱'=>'X','荃'=>'Q','菡'=>'H','蒽'=>'E',
+        '薏'=>'Y','蕤'=>'R','骐'=>'Q','骥'=>'J','鸶'=>'S','黉'=>'H',
+        // 其余常用姓名用字（多数为一级字，写了也无妨；保证同字母组内排序更准）
+        '婷'=>'T','妍'=>'Y','婉'=>'W','馨'=>'X','怡'=>'Y','洁'=>'J','涵'=>'H','涛'=>'T','铭'=>'M','轩'=>'X',
+        '悦'=>'Y','颖'=>'Y','玲'=>'L','琳'=>'L','倩'=>'Q','娜'=>'N','丹'=>'D','雪'=>'X','梅'=>'M','静'=>'J',
+        '磊'=>'L','鹏'=>'P','鸿'=>'H','岚'=>'L','峰'=>'F','阳'=>'Y','洋'=>'Y','泽'=>'Z','浩'=>'H','璇'=>'X',
+        '瑶'=>'Y','珊'=>'S','珂'=>'K','瑾'=>'J','琼'=>'Q','桢'=>'Z','桐'=>'T','榆'=>'Y','枫'=>'F','柏'=>'B',
+        '松'=>'S','莉'=>'L','萍'=>'P','蕾'=>'L','莹'=>'Y','芸'=>'Y','瑜'=>'Y','珍'=>'Z','珠'=>'Z','妤'=>'Y',
+        '姝'=>'S','娴'=>'X','媛'=>'Y','婕'=>'J','嫣'=>'Y','晴'=>'Q','诗'=>'S','语'=>'Y','雯'=>'W','琦'=>'Q',
+    ];
+    if (isset($extra[$ch])) return $extra[$ch];
+    $gbk = @iconv('UTF-8', 'GBK//IGNORE', $ch);
+    if ($gbk === false || strlen($gbk) < 2) return '';
+    $code = (ord($gbk[0]) << 8) + ord($gbk[1]);
+    static $table = [
+        [0xB0A1, 0xB0C4, 'A'], [0xB0C5, 0xB2C0, 'B'], [0xB2C1, 0xB4ED, 'C'],
+        [0xB4EE, 0xB6E9, 'D'], [0xB6EA, 0xB7A1, 'E'], [0xB7A2, 0xB8C0, 'F'],
+        [0xB8C1, 0xB9FD, 'G'], [0xB9FE, 0xBBF6, 'H'], [0xBBF7, 0xBFA5, 'J'],
+        [0xBFA6, 0xC0AB, 'K'], [0xC0AC, 0xC2E7, 'L'], [0xC2E8, 0xC4C2, 'M'],
+        [0xC4C3, 0xC5B5, 'N'], [0xC5B6, 0xC5BD, 'O'], [0xC5BE, 0xC6D9, 'P'],
+        [0xC6DA, 0xC8BA, 'Q'], [0xC8BB, 0xC8F5, 'R'], [0xC8F6, 0xCBF9, 'S'],
+        [0xCBFA, 0xCDD9, 'T'], [0xCDDA, 0xCEF3, 'W'], [0xCEF4, 0xD188, 'X'],
+        [0xD1B9, 0xD4D0, 'Y'], [0xD4D1, 0xD7F9, 'Z'],
+    ];
+    foreach ($table as $row) {
+        if ($code >= $row[0] && $code <= $row[1]) return $row[2];
+    }
+    return '';
+}
+
+/** 姓名 → 排序键（整名首字母，如「蔡佳琪」→ CJQ）；英文/数字原样保留并大写 */
+function nameSortKey(string $name): string {
+    $out = '';
+    $len = mb_strlen($name, 'UTF-8');
+    for ($i = 0; $i < $len; $i++) {
+        $ch = mb_substr($name, $i, 1, 'UTF-8');
+        if (preg_match('/^[A-Za-z0-9]$/', $ch)) { $out .= strtoupper($ch); continue; }
+        $ini = pinyinInitialOfChar($ch);
+        if ($ini !== '') $out .= $ini;
+    }
+    return $out;
+}
+
+/** 花名册拼音排序键：ICU zh_CN sort key 的 **十六进制**（字典序 = 字节序 = 拼音序）。
+ *  ⚠️ 必须转成 Hex 再入库：原始 sort key 是二进制、不是合法 UTF-8，
+ *  一旦被 SELECT * 带进 json_encode 会让整个接口返回空。 */
+function rosterSortKey(string $name): string {
+    static $collator = null, $tried = false;
+    if (!$tried) {
+        $tried = true;
+        if (class_exists('Collator')) {
+            try { $collator = new Collator('zh_CN'); } catch (\Throwable $e) { $collator = null; }
+        }
+    }
+    if ($collator instanceof Collator) {
+        $k = $collator->getSortKey($name);
+        if (is_string($k) && $k !== '') return bin2hex(substr($k, 0, 240));
+    }
+    return nameSortKey($name);   // 无 intl 时的兜底（纯 ASCII 首字母）
+}
+/** 花名册按拼音首字母 A-Z 排序（同键按姓名、再按 id 兜底） */
+function sortRosterByPinyin(array $rows, string $nameKey = 'name'): array {
+    // 首选 ICU 的 zh_CN 排序器：按「完整拼音」排序，覆盖全部汉字（含 GB2312 二级字/生僻字）
+    static $collator = null;
+    static $collatorTried = false;
+    if (!$collatorTried) {
+        $collatorTried = true;
+        if (class_exists('Collator')) {
+            try { $collator = new Collator('zh_CN'); } catch (\Throwable $e) { $collator = null; }
+        }
+    }
+    if ($collator instanceof Collator) {
+        $c = $collator;
+        usort($rows, function ($a, $b) use ($c, $nameKey) {
+            $r = $c->compare((string)($a[$nameKey] ?? ''), (string)($b[$nameKey] ?? ''));
+            return $r !== 0 ? $r : ((int)($a['id'] ?? 0) <=> (int)($b['id'] ?? 0));
+        });
+        return $rows;
+    }
+    // 兜底（无 intl 扩展时）：GB2312 首字母 + 二级字补充映射
+    usort($rows, function ($a, $b) use ($nameKey) {
+        $na = (string)($a[$nameKey] ?? '');
+        $nb = (string)($b[$nameKey] ?? '');
+        $ka = nameSortKey($na);
+        $kb = nameSortKey($nb);
+        if ($ka !== $kb) return strcmp($ka, $kb);
+        if ($na !== $nb) return strcmp($na, $nb);
+        return (int)($a['id'] ?? 0) <=> (int)($b['id'] ?? 0);
+    });
+    return $rows;
+}

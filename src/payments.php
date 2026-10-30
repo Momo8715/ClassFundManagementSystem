@@ -8,7 +8,7 @@ function handleRoster(string $method) {
     switch ($method) {
         case 'GET':
             requirePermission('viewPayments');
-            $rows = db()->query("SELECT * FROM class_roster ORDER BY id")->fetchAll();
+            $rows = db()->query("SELECT id, name, exempt, created_at FROM class_roster ORDER BY sort_key, id")->fetchAll();
             jsonOutput(['roster' => $rows]);
             break;
 
@@ -25,13 +25,13 @@ function handleRoster(string $method) {
             }
             if (empty($names)) jsonOutput(['error' => '请提供学生姓名列表'], 400);
 
-            $stmt = db()->prepare("INSERT IGNORE INTO class_roster (name) VALUES (:n)");
+            $stmt = db()->prepare("INSERT IGNORE INTO class_roster (name, sort_key) VALUES (:n, :k)");
             $count = 0;
             foreach ($names as $n) {
                 if (!is_string($n)) continue; // 跳过非字符串元素，防止 trim() 报错
                 $n = trim($n);
                 if ($n && mb_strlen($n) <= 50) {
-                    $stmt->execute([':n' => $n]);
+                    $stmt->execute([':n' => $n, ':k' => rosterSortKey($n)]);
                     $count += $stmt->rowCount();
                 }
             }
@@ -121,9 +121,9 @@ function handleRosterXlsx() {
     $doImport = ($_POST['do_import'] ?? '') === '1';
     if ($doImport) {
         requireCsrfToken();
-        $stmt = db()->prepare("INSERT IGNORE INTO class_roster (name) VALUES (:n)");
+        $stmt = db()->prepare("INSERT IGNORE INTO class_roster (name, sort_key) VALUES (:n, :k)");
         $count = 0;
-        foreach ($names as $n) { $stmt->execute([':n' => $n]); $count += $stmt->rowCount(); }
+        foreach ($names as $n) { $stmt->execute([':n' => $n, ':k' => rosterSortKey($n)]); $count += $stmt->rowCount(); }
         $user = currentUser();
         addLog($user['id'], $user['username'], 'upload_roster_xlsx', 'roster', null, ['count' => $count]);
         jsonOutput(['ok' => true, 'imported' => $count, 'preview' => $names]);
@@ -138,7 +138,7 @@ function handleExpectedPayment(string $method) {
 
     switch ($method) {
         case 'GET':
-            $roster = db()->query("SELECT * FROM class_roster ORDER BY id")->fetchAll();
+            $roster = db()->query("SELECT id, name, exempt, created_at FROM class_roster ORDER BY sort_key, id")->fetchAll();
             $pp = getMeta('per_person');
             jsonOutput([
                 'roster'     => $roster,
@@ -186,7 +186,7 @@ function handleExpectedPayment(string $method) {
 function handlePayments() {
     requirePermission('viewPayments');
 
-    $roster = db()->query("SELECT * FROM class_roster ORDER BY id")->fetchAll();
+    $roster = db()->query("SELECT id, name, exempt, created_at FROM class_roster ORDER BY sort_key, id")->fetchAll();
     $txs = db()->query("SELECT * FROM transactions WHERE type='income' AND sub_category='班费收缴' AND deleted_at IS NULL ORDER BY date DESC")->fetchAll();
 
     // 构建学生缴费状态
@@ -357,7 +357,7 @@ function handlePayments() {
 function handleExportUnpaid() {
     requirePermission('viewPayments');
 
-    $roster = db()->query("SELECT * FROM class_roster ORDER BY id")->fetchAll();
+    $roster = db()->query("SELECT id, name, exempt, created_at FROM class_roster ORDER BY sort_key, id")->fetchAll();
     $ps = [];
     foreach ($roster as $s) $ps[$s['id']] = ['name' => $s['name'], 'paid' => 0.0, 'exempt' => $s['exempt']];
 
