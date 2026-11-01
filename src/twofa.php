@@ -7,6 +7,23 @@ require_once __DIR__ . '/totp.php';
 const TWOFA_PENDING_TTL = 300;      // 密码通过后，等待验证码的有效期（秒）
 const TWOFA_MAX_ATTEMPTS = 5;
 
+/** 管理员 2FA 策略状态 */
+function twofaPolicy(): array {
+    $enabled = getMeta('require_2fa', '0') === '1';
+    $until = trim(getMeta('require_2fa_grace_until', ''));
+    $expired = $enabled && $until !== '' && strtotime($until) !== false && strtotime($until) <= time();
+    return ['enabled' => $enabled, 'grace_until' => $until, 'expired' => $expired];
+}
+
+function twofaIsPrivileged(array $roles): bool {
+    return in_array('admin', $roles, true) || in_array('head_teacher', $roles, true);
+}
+
+function twofaNeedsSetup(array $roles, bool $totpEnabled): bool {
+    $p = twofaPolicy();
+    return $p['enabled'] && $p['expired'] && twofaIsPrivileged($roles) && !$totpEnabled;
+}
+
 /** 读取用户两步验证相关字段 */
 function twofaUser(int $id): ?array {
     $stmt = db()->prepare("SELECT id, username, password, roles, roster_id, must_change_password, banned, ban_reason,
@@ -56,6 +73,7 @@ function twofaApplyLoginSession(array $user): array {
     $_SESSION['roster_id'] = (int)($user['roster_id'] ?? 0);
     $_SESSION['totp_enabled'] = !empty($user['totp_enabled']);
     $_SESSION['must_change_password'] = !empty($user['must_change_password']);
+    $_SESSION['must_enable_2fa'] = twofaNeedsSetup($_SESSION['roles'], !empty($user['totp_enabled']));
     $_SESSION['ban_checked_at'] = time();
     $_SESSION['banned'] = false;
     unset($_SESSION['student_name']);
@@ -171,6 +189,9 @@ function handleTwofaSetup() {
             'remaining_backup_codes' => count($hashes),
             'account' => (string)$row['username'],
             'issuer' => SITE_NAME,
+            'policy' => twofaPolicy(),
+            'policy_applies' => twofaIsPrivileged(normalizeRoles($row['roles'])),
+            'must_enable' => !empty($_SESSION['must_enable_2fa']),
         ]);
     }
 
@@ -205,6 +226,7 @@ function handleTwofaSetup() {
             ->execute([':s' => $secret, ':b' => json_encode($backup['hashes']), ':st' => (int)$check['step'], ':id' => $uid]);
         unset($_SESSION['totp_setup_secret'], $_SESSION['totp_setup_at']);
         $_SESSION['totp_enabled'] = true;
+        $_SESSION['must_enable_2fa'] = false;
         addLog($uid, (string)$row['username'], '2fa_enable', 'user', $uid);
         jsonOutput(['ok' => true, 'enabled' => true, 'backup_codes' => $backup['codes']]);
     }
@@ -221,6 +243,10 @@ function handleTwofaSetup() {
         if (!$check['ok']) jsonOutput(['error' => '验证码或备用码不正确'], 401);
 
         if ($op === 'disable') {
+            $policy = twofaPolicy();
+            if ($policy['enabled'] && twofaIsPrivileged(normalizeRoles($row['roles']))) {
+                jsonOutput(['error' => '系统要求管理员开启两步验证，不能关闭；如需更换设备请使用备用码重新生成'], 400);
+            }
             db()->prepare("UPDATE users SET totp_secret=NULL, totp_enabled=0, totp_backup=NULL, totp_last_step=NULL WHERE id=:id")
                 ->execute([':id' => $uid]);
             $_SESSION['totp_enabled'] = false;
@@ -235,4 +261,53 @@ function handleTwofaSetup() {
     }
 
     jsonOutput(['error' => '不支持的操作'], 400);
+}
+
+
+/** 管理员 2FA 强制策略（仅 admin 可改） */
+function handleTwofaPolicy(string $method) {
+    requirePermission('viewSecurity');
+    if ($method === 'GET') {
+        $p = twofaPolicy();
+        $users = db()->query("SELECT id, username, roles, totp_enabled FROM users
+            WHERE (roles LIKE '%admin%' OR roles LIKE '%head_teacher%')
+            ORDER BY id")->fetchAll();
+        $without = [];
+        foreach ($users as $u) {
+            $roles = normalizeRoles($u['roles']);
+            if (twofaIsPrivileged($roles) && empty($u['totp_enabled'])) $without[] = ['id' => (int)$u['id'], 'username' => $u['username']];
+        }
+        jsonOutput(['policy' => $p, 'privileged_without_2fa' => $without, 'count' => count($without)]);
+    }
+    if ($method === 'POST') {
+        if (!empty($_SESSION['must_enable_2fa'])) jsonOutput(['error' => '请先启用两步验证，再修改策略'], 403);
+        requireCsrfToken();
+        $input = jsonInput();
+        $enabled = !empty($input['enabled']) && $input['enabled'] !== '0' && $input['enabled'] !== 'false';
+        $days = (int)($input['grace_days'] ?? 7);
+        if ($days < 0 || $days > 90) jsonOutput(['error' => '宽限期需在 0-90 天之间'], 400);
+        $old = twofaPolicy();
+        if (!$enabled) {
+            setMeta('require_2fa', '0');
+            setMeta('require_2fa_grace_until', '');
+        } else {
+            setMeta('require_2fa', '1');
+            if (!$old['enabled'] || !empty($input['reset_grace'])) {
+                setMeta('require_2fa_grace_until', date('Y-m-d H:i:s', time() + $days * 86400));
+            } elseif ($old['grace_until'] === '') {
+                setMeta('require_2fa_grace_until', date('Y-m-d H:i:s', time() + $days * 86400));
+            }
+            setMeta('require_2fa_set_at', date('Y-m-d H:i:s'));
+        }
+        // 立即刷新当前用户的 must_enable 状态
+        $u = currentUser();
+        if ($u && (int)$u['id'] > 0) {
+            $_SESSION['must_enable_2fa'] = twofaNeedsSetup($u['roles'], !empty($_SESSION['totp_enabled']));
+        }
+        addLog((int)($u['id'] ?? 0), (string)($u['username'] ?? 'system'), 'twofa_policy_save', 'system', null, [
+            'enabled' => $enabled, 'days' => $days, 'grace_until' => getMeta('require_2fa_grace_until'),
+        ]);
+        jsonOutput(['ok' => true, 'policy' => twofaPolicy(), 'must_enable' => !empty($_SESSION['must_enable_2fa'])]);
+    }
+    jsonOutput(['error' => '不支持的方法'], 405);
 }

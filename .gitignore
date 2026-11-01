@@ -45,3 +45,6 @@ _emoji_test.txt
 
 # QQ 网关客户端安装目录标记（由 tools/qqgw/install.sh 生成，含本机路径）
 .qqgw_dir
+
+# Node 构建依赖
+node_modules/

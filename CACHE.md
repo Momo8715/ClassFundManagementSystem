@@ -149,3 +149,19 @@ curl -sI https://classfund.hw.陌沫.cn/assets/css/style.css | grep -i 'cf-cache
 3. 项目侧：`.htaccess` 纳入版本控制并封禁 `db_config.json`/`backup_*`；`install.php` 改用 `isDbInstalled()` 判定。
 
 **待办**：`db_config.json` 中的数据库密码曾公网可读，应尽快轮换。
+
+
+## 七、v1.13 上传访问收紧
+
+凭证原图不再建议直接通过 URL 访问；图片统一经登录态 `api.php?action=tx_image` 输出。
+在站点 nginx 配置（80/443 两个 server 块）加入：
+
+```nginx
+location ^~ /uploads/ {
+    deny all;
+}
+```
+
+- Apache 下 `uploads/.htaccess` 已默认拒绝直接访问。
+- 旧账目的 `uploads/...` 直连路径会由 `assets/js/legacy-image.js` 自动改写为 API 地址；如仍有遗漏，运行数据体检的"修复凭证路径"。
+- 修改 nginx 后执行 `nginx -t && nginx -s reload`，并验证登录后凭证缩略图/原图可正常打开。

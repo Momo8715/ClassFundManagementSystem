@@ -1,9 +1,11 @@
-# 禁止 PHP 执行，防止恶意脚本上传后被运行（兼容 mod_php 与 php-fpm）
-<FilesMatch "\.(php|phtml|php3|php4|php5|php7|php8|phps|phar)$">
-  Require all denied
-</FilesMatch>
+# 禁止直接访问 uploads/ 下的任何文件；图片统一经 api.php?action=tx_image 输出
+<IfModule mod_authz_core.c>
+  <FilesMatch ".*">
+    Require all denied
+  </FilesMatch>
+</IfModule>
 <IfModule !mod_authz_core.c>
-  <FilesMatch "\.(php|phtml|php3|php4|php5|php7|php8|phps|phar)$">
+  <FilesMatch ".*">
     Order allow,deny
     Deny from all
   </FilesMatch>

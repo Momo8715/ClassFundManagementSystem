@@ -111,78 +111,159 @@ function makeImageThumbnail(string $data, int $maxEdge = 400): ?string {
     return ($out === false || $out === '') ? null : $out;
 }
 
+/** 读取 JPEG EXIF 方向（无 exif 扩展时返回 1） */
+function imageExifOrientation(string $data): int {
+    if (!function_exists('exif_read_data') || $data === '') return 1;
+    $tmp = tempnam(sys_get_temp_dir(), 'exif');
+    if ($tmp === false) return 1;
+    @file_put_contents($tmp, $data);
+    $exif = @exif_read_data($tmp);
+    @unlink($tmp);
+    $o = (int)($exif['Orientation'] ?? 1);
+    return in_array($o, [1, 3, 6, 8], true) ? $o : 1;
+}
+
+/**
+ * 生成规范化图片（纠正方向、去掉 EXIF、限制最长边、JPEG 压缩）。
+ * @return array{data:string,mime:string,width:int,height:int}|null
+ */
+function makeImageVariant(string $data, int $maxEdge = 1600, int $quality = 82): ?array {
+    if (!extension_loaded('gd') || $data === '') return null;
+    $img = @imagecreatefromstring($data);
+    if ($img === false) return null;
+    $orientation = imageExifOrientation($data);
+    if ($orientation === 3) {
+        $rot = @imagerotate($img, 180, 0);
+    } elseif ($orientation === 6) {
+        $rot = @imagerotate($img, -90, 0);
+    } elseif ($orientation === 8) {
+        $rot = @imagerotate($img, 90, 0);
+    } else {
+        $rot = false;
+    }
+    if ($rot !== false) { imagedestroy($img); $img = $rot; }
+    $w = imagesx($img);
+    $h = imagesy($img);
+    if ($w < 1 || $h < 1) { imagedestroy($img); return null; }
+    $scale = min(1.0, $maxEdge / max($w, $h));
+    $nw = max(1, (int)round($w * $scale));
+    $nh = max(1, (int)round($h * $scale));
+    $dst = imagecreatetruecolor($nw, $nh);
+    if ($dst === false) { imagedestroy($img); return null; }
+    $white = imagecolorallocate($dst, 255, 255, 255);
+    imagefilledrectangle($dst, 0, 0, $nw, $nh, $white);
+    imagecopyresampled($dst, $img, 0, 0, 0, 0, $nw, $nh, $w, $h);
+    ob_start();
+    imagejpeg($dst, null, $quality);
+    $out = ob_get_clean();
+    imagedestroy($img);
+    imagedestroy($dst);
+    if ($out === false || $out === '') return null;
+    return ['data' => $out, 'mime' => 'image/jpeg', 'width' => $nw, 'height' => $nh];
+}
+
+/** 安全解析 uploads 相对路径（只允许 uploads/ 下、无 ..、无绝对路径） */
+function receiptSafePath(string $rel): ?string {
+    $rel = ltrim(str_replace('\\', '/', $rel), '/');
+    if ($rel === '' || strpos($rel, 'uploads/') !== 0 || strpos($rel, '..') !== false) return null;
+    return dirname(__DIR__) . '/' . $rel;
+}
+
+/**
+ * 清理孤儿凭证：未关联收支且超过 N 小时。
+ * 返回 [rows, files]。
+ */
+function cleanupOrphanImages(int $hours = 24): array {
+    $rows = 0; $files = 0;
+    try {
+        $stmt = db()->prepare("SELECT id, full_path FROM tx_images
+            WHERE transaction_id=0 AND created_at < (NOW() - INTERVAL :h HOUR)");
+        $stmt->bindValue(':h', max(1, $hours), PDO::PARAM_INT);
+        $stmt->execute();
+        $list = $stmt->fetchAll();
+        if ($list) {
+            // 先按 id 条件删除，确认删除成功后再删文件，避免与“关联图片”并发时误删
+            $del = db()->prepare("DELETE FROM tx_images WHERE id=:id AND transaction_id=0");
+            foreach ($list as $img) {
+                $del->execute([':id' => (int)$img['id']]);
+                if ($del->rowCount() < 1) continue;
+                $rows++;
+                $abs = receiptSafePath((string)($img['full_path'] ?? ''));
+                if ($abs && is_file($abs) && @unlink($abs)) $files++;
+            }
+        }
+    } catch (\Throwable $e) { /* 表缺失/清理失败不影响主流程 */ }
+    return ['rows' => $rows, 'files' => $files];
+}
+
 function handleUploadImage() {
     requirePermission('addTransaction');
     requireCsrfToken();
 
     if (empty($_FILES['image'])) {
-            jsonOutput(['error' => '没有上传文件'], 400);
+        jsonOutput(['error' => '没有上传文件'], 400);
     }
 
-    // 清理孤儿凭证图：上传后超过 24 小时仍未关联收支记录（transaction_id=0）的图片
-    try {
-        db()->exec("DELETE FROM tx_images WHERE transaction_id = 0 AND created_at < (NOW() - INTERVAL 24 HOUR)");
-    } catch (\Exception $e) {
-        // 清理失败不影响本次上传
-    }
+    // 顺手清理超过 24 小时仍未关联的孤儿图（行 + 文件）
+    cleanupOrphanImages(24);
 
     $file = $_FILES['image'];
-
-    // 使用真实 MIME 检测（修复：之前仅检查扩展名）
     $error = validateImageUpload($file);
     if ($error !== null) {
-            securityLog('invalid_image_upload', ['error' => $error, 'filename' => $file['name'] ?? 'unknown']);
+        securityLog('invalid_image_upload', ['error' => $error, 'filename' => $file['name'] ?? 'unknown']);
         jsonOutput(['error' => $error], 400);
     }
 
-    // 通过 MIME 确定安全类型（fileinfo 缺失时回退 getimagesize）
-    $mime = '';
-    if (function_exists('finfo_open')) {
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $mime = finfo_file($finfo, $file['tmp_name']);
-        finfo_close($finfo);
-    }
-    if (empty($mime)) {
-        $info = @getimagesize($file['tmp_name']);
-        if ($info !== false) $mime = $info['mime'];
-    }
+    $raw = @file_get_contents($file['tmp_name']);
+    if ($raw === false || $raw === '') jsonOutput(['error' => '读取图片失败'], 500);
 
-    // v1.7：凭证图片原图存入 uploads/receipts/ 文件，数据库只存缩略图+路径（减轻数据库体积）
-    $full = file_get_contents($file['tmp_name']);
-    if ($full === false || $full === '') {
-            jsonOutput(['error' => '读取图片失败'], 500);
-    }
-    $thumb = makeImageThumbnail($full, 400);
-    if ($thumb === null) {
-            jsonOutput(['error' => '图片处理失败（服务器不支持该图片格式或 GD 不可用）'], 500);
-    }
+    // v1.13：规范化原图（纠正方向、去 EXIF、限制最长边），并生成 Web 回退版
+    $full = makeImageVariant($raw, 2400, 88);
+    if ($full === null) jsonOutput(['error' => '图片处理失败（服务器不支持该图片格式或 GD 不可用）'], 500);
+    $web = makeImageVariant($raw, 1600, 80);
+    $thumb = makeImageThumbnail($full['data'], 400);
+    if ($thumb === null) jsonOutput(['error' => '缩略图生成失败'], 500);
 
-    // 生成随机文件名（防猜测）并写入 uploads/receipts/
     $dir = dirname(__DIR__) . '/uploads/receipts';
     if (!is_dir($dir)) @mkdir($dir, 0755, true);
-    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION)) ?: 'jpg';
-    $ext = preg_replace('/[^a-z0-9]/', '', $ext);
-    if (!in_array($ext, ['jpg','jpeg','png','gif','webp'], true)) $ext = 'jpg';
-    $fname = date('YmdHis') . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+    $fname = date('YmdHis') . '_' . bin2hex(random_bytes(8)) . '.jpg';
     $fpath = $dir . '/' . $fname;
-    if (@file_put_contents($fpath, $full) === false) {
-            jsonOutput(['error' => '图片保存失败，请稍后重试'], 500);
+    if (@file_put_contents($fpath, $full['data']) === false) {
+        jsonOutput(['error' => '图片保存失败，请稍后重试'], 500);
     }
     $relPath = 'uploads/receipts/' . $fname;
+    $sha = hash('sha256', $full['data']);
+    $size = strlen($full['data']);
+    $webData = $web['data'] ?? null;
+    // Web 回退版限制 600KB，避免数据库无限膨胀
+    if ($webData !== null && strlen($webData) > 600 * 1024) $webData = null;
 
     try {
-        $stmt = db()->prepare("INSERT INTO tx_images (transaction_id, seq, mime, thumb, full, full_path) VALUES (0, 0, :mime, :thumb, '', :fpath)");
-        $stmt->bindValue(':mime', $mime);
+        $stmt = db()->prepare("INSERT INTO tx_images
+            (transaction_id, seq, mime, thumb, full, full_path, sha256, byte_size, px_width, px_height, web, web_mime)
+            VALUES (0, 0, :mime, :thumb, '', :fpath, :sha, :size, :w, :h, :web, :webmime)");
+        $stmt->bindValue(':mime', $full['mime']);
         $stmt->bindValue(':thumb', $thumb, PDO::PARAM_LOB);
         $stmt->bindValue(':fpath', $relPath);
+        $stmt->bindValue(':sha', $sha);
+        $stmt->bindValue(':size', $size, PDO::PARAM_INT);
+        $stmt->bindValue(':w', $full['width'], PDO::PARAM_INT);
+        $stmt->bindValue(':h', $full['height'], PDO::PARAM_INT);
+        if ($webData !== null) {
+            $stmt->bindValue(':web', $webData, PDO::PARAM_LOB);
+            $stmt->bindValue(':webmime', $web['mime'] ?? 'image/jpeg');
+        } else {
+            $stmt->bindValue(':web', null, PDO::PARAM_NULL);
+            $stmt->bindValue(':webmime', null, PDO::PARAM_NULL);
+        }
         $stmt->execute();
         $imgId = (int)db()->lastInsertId();
-        } catch (\Throwable $e) {
-            @unlink($fpath);
-            jsonOutput(['error' => '图片保存失败，请稍后重试'], 500);
+    } catch (\Throwable $e) {
+        @unlink($fpath);
+        jsonOutput(['error' => '图片保存失败，请稍后重试'], 500);
     }
 
-    jsonOutput(['ok' => true, 'id' => $imgId]);
+    jsonOutput(['ok' => true, 'id' => $imgId, 'sha256' => $sha, 'size' => $size]);
 }
 
 // ==================== 凭证图片读取（数据库） ====================
@@ -191,36 +272,73 @@ function handleTxImage() {
     requirePermission('viewTransactions');
     if ((int)(currentUser()['id'] ?? 0) === 0) jsonOutput(['error' => '访客无权查看凭证'], 403);
 
+    // 旧版直连路径（uploads/...）改为统一经 API 输出，便于 nginx 禁止 /uploads/ 直连
+    $legacyPath = trim((string)($_GET['path'] ?? ''));
+    if ($legacyPath !== '') {
+        $abs = receiptSafePath($legacyPath);
+        if (!$abs || !is_file($abs) || !is_readable($abs)) jsonOutput(['error' => '图片不存在'], 404);
+        $mime = '';
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime = (string)finfo_file($finfo, $abs);
+            finfo_close($finfo);
+        }
+        $info = @getimagesize($abs);
+        if ($info !== false) $mime = (string)($info['mime'] ?? $mime);
+        if (!in_array($mime, ['image/jpeg','image/png','image/gif','image/webp'], true)) {
+            jsonOutput(['error' => '不支持的图片类型'], 404);
+        }
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Type: ' . $mime);
+        header('Content-Length: ' . filesize($abs));
+        header('Cache-Control: private, max-age=86400, immutable');
+        header('Vary: Cookie');
+        readfile($abs);
+        exit;
+    }
+
     $id = intval($_GET['id'] ?? 0);
     if ($id <= 0) jsonOutput(['error' => '无效图片 ID'], 400);
     $thumb = !empty($_GET['thumb']);
 
-    $stmt = db()->prepare("SELECT mime, thumb, full, full_path FROM tx_images WHERE id=:id");
+    $stmt = db()->prepare("SELECT mime, thumb, full, full_path, web, web_mime FROM tx_images WHERE id=:id");
     $stmt->execute([':id' => $id]);
     $row = $stmt->fetch();
     if (!$row) jsonOutput(['error' => '图片不存在'], 404);
 
-    $mime = $row['mime'] ?: 'image/jpeg';
+    $data = '';
+    $outMime = $row['mime'] ?: 'image/jpeg';
+
     if ($thumb) {
-        // 缩略图始终从数据库读取（小体积）
-        $data = $row['thumb'];
+        if (!empty($row['thumb'])) { $data = $row['thumb']; $outMime = 'image/jpeg'; }
     } else {
-        // 原图优先从文件读取，旧数据（full 在 DB）回退
-        $data = '';
-        $p = $row['full_path'];
-        if (!empty($p)) {
-            $abs = dirname(__DIR__) . '/' . $p;
-            $data = (is_file($abs) && is_readable($abs)) ? file_get_contents($abs) : '';
+        // 原图文件 → Web 压缩版 → 数据库旧原图 → 缩略图，逐级回退
+        $abs = receiptSafePath((string)($row['full_path'] ?? ''));
+        if ($abs && is_file($abs) && is_readable($abs)) {
+            $data = (string)file_get_contents($abs);
+            $outMime = $row['mime'] ?: 'image/jpeg';
         }
-        if ($data === '' && !empty($row['full'])) $data = $row['full'];
+        if ($data === '' && !empty($row['web'])) {
+            $data = $row['web'];
+            $outMime = $row['web_mime'] ?: 'image/jpeg';
+        }
+        if ($data === '' && !empty($row['full'])) {
+            $data = $row['full'];
+            $outMime = $row['mime'] ?: 'image/jpeg';
+        }
+        if ($data === '' && !empty($row['thumb'])) {
+            $data = $row['thumb'];
+            $outMime = 'image/jpeg';
+        }
     }
-    if (empty($data)) jsonOutput(['error' => '图片数据为空'], 404);
+    if ($data === '') jsonOutput(['error' => '图片数据为空'], 404);
 
     header('X-Content-Type-Options: nosniff');
-    header('Content-Type: ' . $mime);
+    header('Content-Type: ' . $outMime);
     header('Content-Length: ' . strlen($data));
-    // 凭证图片入库后不可变，允许浏览器/CDN 缓存 1 天
-    header('Cache-Control: public, max-age=2592000, immutable');
+    // 凭证属于登录用户数据：只允许私有缓存，禁止 CDN/公共代理缓存
+    header('Cache-Control: private, max-age=86400, immutable');
+    header('Vary: Cookie');
     echo $data;
     exit;
 }

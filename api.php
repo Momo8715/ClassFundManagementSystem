@@ -42,6 +42,7 @@ require_once __DIR__ . '/src/logs.php';
 require_once __DIR__ . '/src/security.php';
 require_once __DIR__ . '/src/import_export.php';
 require_once __DIR__ . '/src/import_batches.php';
+require_once __DIR__ . '/src/backup.php';
 require_once __DIR__ . '/src/report.php';
 require_once __DIR__ . '/src/pay.php';
 require_once __DIR__ . '/src/health.php';
@@ -64,6 +65,7 @@ $actionMethods = [
     'guest_login' => ['POST'],
     'logout' => ['POST'],
     'twofa_setup' => ['POST'],
+    'twofa_policy' => ['GET', 'POST'],
     'change_password' => ['POST'],
     'transactions_batch' => ['POST'],
     'import' => ['POST'],
@@ -77,6 +79,15 @@ $actionMethods = [
     'export_security_csv' => ['GET'],
     'health_check' => ['GET'],
     'health_fix' => ['POST'],
+    'health_ack' => ['POST'],
+    'health_unack' => ['POST'],
+    'backup_list' => ['GET'],
+    'backup_create' => ['POST'],
+    'backup_cron' => ['GET'],
+    'backup_download' => ['GET'],
+    'backup_restore' => ['POST'],
+    'backup_delete' => ['POST'],
+    'backup_retention' => ['POST'],
     'pay_meta' => ['GET'],
     'pay_create' => ['POST'],
     'pay_config_get' => ['GET'],
@@ -110,6 +121,9 @@ switch ($action) {
         break;
     case 'twofa_setup':
         handleTwofaSetup();
+        break;
+    case 'twofa_policy':
+        handleTwofaPolicy($method);
         break;
     case 'guest_login':
         handleGuestLogin();
@@ -235,6 +249,33 @@ switch ($action) {
         break;
     case 'health_fix':
         handleHealthFix();
+        break;
+    case 'health_ack':
+        handleHealthAck();
+        break;
+    case 'health_unack':
+        handleHealthUnack();
+        break;
+    case 'backup_list':
+        handleBackupList();
+        break;
+    case 'backup_create':
+        handleBackupCreate();
+        break;
+    case 'backup_cron':
+        handleBackupCron();
+        break;
+    case 'backup_download':
+        handleBackupDownload();
+        break;
+    case 'backup_restore':
+        handleBackupRestore();
+        break;
+    case 'backup_delete':
+        handleBackupDelete();
+        break;
+    case 'backup_retention':
+        handleBackupRetentionSave();
         break;
 
     // ========== 在线支付 ==========

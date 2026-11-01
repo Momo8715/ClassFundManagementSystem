@@ -92,7 +92,11 @@ function handleTransactionsGet() {
     $page   = max(1, intval($_GET['page'] ?? 1));
     $perPage = min(1000, max(10, intval($_GET['per_page'] ?? 50)));
 
-    $sql = "SELECT t.*, u.username as recorder_name FROM transactions t LEFT JOIN users u ON t.recorded_by=u.id WHERE t.deleted_at IS NULL";
+    $sql = "SELECT t.*, u.username as recorder_name, s.status AS semester_status, s.name AS semester_name
+        FROM transactions t
+        LEFT JOIN users u ON t.recorded_by=u.id
+        LEFT JOIN semesters s ON s.id=t.semester_id
+        WHERE t.deleted_at IS NULL";
     $countSql = "SELECT COUNT(*) FROM transactions t WHERE t.deleted_at IS NULL";
     $params = [];
 
@@ -164,6 +168,10 @@ function handleTransactionsGet() {
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
+    foreach ($rows as &$row) {
+        $row['locked'] = (($row['semester_status'] ?? '') === 'archived');
+    }
+    unset($row);
 
     jsonOutput([
         'transactions' => $rows,
@@ -434,7 +442,30 @@ function handleTransactionsPut() {
         if ($newSubCat === '班费收缴' && $newPerPerson !== null && $newPerPerson > 0) setMeta('per_person', (string)$newPerPerson);
 
         $user = currentUser();
-        addLog($user['id'], $user['username'], 'update_transaction', 'transaction', $id);
+        // v1.13：记录编辑前后值，日志页可展开对比
+        $before = [
+            'type' => $old['type'], 'sub_category' => $old['sub_category'],
+            'amount' => $old['amount'], 'date' => $old['date'],
+            'description' => $old['description'], 'category' => $old['category'],
+            'payer_ids' => $old['payer_ids'], 'exempt_ids' => $old['exempt_ids'],
+            'per_person' => $old['per_person'], 'expected_amount' => $old['expected_amount'],
+            'semester_id' => $old['semester_id'] ?? null,
+        ];
+        $after = [
+            'type' => $newType, 'sub_category' => $newSubCat,
+            'amount' => $newAmount, 'date' => $newDate,
+            'description' => $newDesc, 'category' => $newCat,
+            'payer_ids' => $newPayerIds, 'exempt_ids' => $newExemptIds,
+            'per_person' => $newPerPerson, 'expected_amount' => $newExpAmt,
+            'semester_id' => $newSemesterId,
+        ];
+        $changed = [];
+        foreach ($before as $k => $v) {
+            if ((string)$v !== (string)($after[$k] ?? '')) $changed[] = $k;
+        }
+        addLog($user['id'], $user['username'], 'update_transaction', 'transaction', $id, [
+            'before' => $before, 'after' => $after, 'changed' => $changed,
+        ]);
 
         jsonOutput(['ok' => true]);
     } catch (\Exception $e) {
@@ -507,7 +538,15 @@ function handleDashboard() {
     $expenseCount = db()->query("SELECT COUNT(*) FROM transactions WHERE type='expense' AND deleted_at IS NULL")->fetchColumn();
     $userCount = db()->query("SELECT COUNT(*) FROM users")->fetchColumn();
 
-    $recent = db()->query("SELECT t.*, u.username as recorder_name FROM transactions t LEFT JOIN users u ON t.recorded_by=u.id WHERE t.deleted_at IS NULL ORDER BY t.date DESC, t.id DESC LIMIT 8")->fetchAll();
+    $recent = db()->query("SELECT t.*, u.username as recorder_name, s.status AS semester_status, s.name AS semester_name
+        FROM transactions t
+        LEFT JOIN users u ON t.recorded_by=u.id
+        LEFT JOIN semesters s ON s.id=t.semester_id
+        WHERE t.deleted_at IS NULL ORDER BY t.date DESC, t.id DESC LIMIT 8")->fetchAll();
+    foreach ($recent as &$row) {
+        $row['locked'] = (($row['semester_status'] ?? '') === 'archived');
+    }
+    unset($row);
 
     jsonOutput([
         'summary' => [

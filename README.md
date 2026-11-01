@@ -6,7 +6,7 @@
 
 > 上传即用 · 无需命令行 · 宝塔面板友好 · 支持远程一键升级
 
-[![版本](https://img.shields.io/badge/版本-v1.12.0-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
+[![版本](https://img.shields.io/badge/版本-v1.13.0-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
 [![PHP](https://img.shields.io/badge/PHP-8.0%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net)
 [![MySQL](https://img.shields.io/badge/MySQL-5.7%2B-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com)
 [![Status](https://img.shields.io/badge/状态-稳定-22c55e?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem)
@@ -50,7 +50,12 @@
 <tr>
 <td width="33%"><b>📦 学期结转</b><br><sub>归档冻结 · 期初承接 · 快照报表<br>可取消归档 / 重新结账</sub></td>
 <td width="33%"><b>🩺 数据体检</b><br><sub>轮次对账 · 支付核销 · 凭证/账号<br>一键修复可安全处理的项</sub></td>
-<td width="33%"><b>🔐 两步验证</b><br><sub>TOTP 动态码 · 一次性备用码<br>首次登录强制改密</sub></td>
+<td width="33%"><b>🔐 两步验证</b><br><sub>TOTP 动态码 · 一次性备用码<br>首次登录强制改密 / 管理员策略</sub></td>
+</tr>
+<tr>
+<td width="33%"><b>💾 数据备份</b><br><sub>数据库 + uploads 一键备份<br>下载 / 恢复 / 定时任务</sub></td>
+<td width="33%"><b>🖼️ 凭证自愈</b><br><sub>Web 回退版 · 校验哈希 · 去 EXIF<br>原图丢失仍能查看</sub></td>
+<td width="33%"><b>🧾 审计 Diff</b><br><sub>编辑前后字段对比<br>归档行只读锁定</sub></td>
 </tr>
 </table>
 
@@ -138,6 +143,12 @@ ClassFundManagementSystem/
 │   ├── js/semester-carry.js# 学期结转 / 归档
 │   ├── js/import-batches.js# 导入批次 / 撤销
 │   ├── js/health.js        # 数据体检 / 对账中心
+│   ├── js/backup.js        # 数据备份 / 恢复
+│   ├── js/policy.js        # 管理员 2FA 策略
+│   ├── js/archive-lock.js  # 归档行锁定
+│   ├── js/log-diff.js      # 编辑前后 Diff
+│   ├── js/legacy-image.js  # 旧直连图片改走 API
+│   ├── js/common.js        # 新模块公共 API/转义/toast
 │   ├── img/                # 图标与图片
 │   └── vendor/             # 第三方前端库（Chart.js 等）
 ├── src/
@@ -152,6 +163,8 @@ ClassFundManagementSystem/
 │   ├── fee_ledger.php      # 统一费用账本（应缴/已缴/待缴唯一口径）
 │   ├── semesters.php       # 学期结转 / 归档快照 / 冻结
 │   ├── health.php          # 数据体检 / 对账中心
+│   ├── backup.php          # 数据库 + uploads 备份 / 恢复
+│   ├── cron.php            # 定时备份/清理/体检入口
 │   ├── import_batches.php  # 导入批次 / 去重 / 整批撤销
 │   ├── totp.php            # TOTP（RFC 6238）纯 PHP 实现
 │   ├── twofa.php           # 两步验证接口 / 登录挑战
@@ -164,7 +177,13 @@ ClassFundManagementSystem/
 │   ├── helpers.php         # CSRF / 限流 / 校验 / 工具
 │   └── font/unifont/       # 中文字体与字体指标
 ├── tools/
-│   └── qqgw/               # QQ 官方机器人 WebSocket 网关（零依赖 Node）
+│   ├── qqgw/               # QQ 官方机器人 WebSocket 网关（零依赖 Node）
+│   ├── smoke.php           # 纯函数冒烟测试
+│   ├── reset_2fa.php       # 2FA 应急恢复 CLI
+│   └── check-js.js         # 前端 JS 语法检查
+├── tests/                  # MySQL 集成测试（CI 使用）
+├── src-js/app.js           # app.js 可读源码（esbuild 构建）
+├── package.json            # 前端构建脚本（esbuild / prettier）
 ├── deploy.sh               # Linux 部署脚本
 ├── deploy.bat              # Windows 部署脚本
 └── uploads/                # 凭证图片（自动创建）
@@ -198,6 +217,12 @@ ClassFundManagementSystem/
 | 🔑 初始密码 | 新建/导入学生随机生成初始密码，首次登录强制修改；管理员重置同样强制改密 |
 | 🧊 归档冻结 | 已归档学期的收支/导入只读；在线缴费仍可入账但会标记快照过期，需重新结账 |
 | 📥 导入批次 | 每次导入生成批次号，可在导入页整批撤销（软删除进回收站） |
+| 💾 数据备份 | 数据库全部表 + uploads 打包为单个 zip；后台创建/下载/恢复；cron token 定时执行 |
+| 🖼️ 凭证自愈 | 上传时去 EXIF/限尺寸/记 sha256；原文件丢失回退 Web 版或缩略图，不再 404 |
+| 🔒 上传访问 | 建议 nginx 禁止 `/uploads/` 直连，图片统一走登录态 API；旧直连路径自动改写 |
+| 🛡️ 2FA 策略 | 可要求管理员/班主任启用 2FA，设置宽限期；到期限制其他接口，提供 CLI 应急恢复 |
+| 🧾 审计 Diff | 编辑收支记录时保存 before/after/changed，日志页可展开对比 |
+| 🧪 集成测试 | GitHub Actions 起 MySQL，覆盖迁移、备份恢复、凭证、归档、2FA、cron |
 
 ### 🌐 nginx 部署必读（宝塔默认使用 nginx）
 
@@ -207,6 +232,8 @@ ClassFundManagementSystem/
 # 禁止下载数据库配置与建表脚本，禁止访问升级备份目录
 location ~* (db_config\.json|config\.php|schema\.sql)$ { return 404; }
 location ^~ /backup_ { return 404; }
+# 凭证原图只允许通过登录态 api.php?action=tx_image 读取
+location ^~ /uploads/ { deny all; }
 ```
 
 否则 `db_config.json`（含数据库账号密码）可能被直接下载。
@@ -254,11 +281,12 @@ location ^~ /backup_ { return 404; }
 | 学期与结转 | 学期日期重叠、多个进行中、归档快照过期、流水未归入学期 |
 | 班费轮次 | 轮次金额与缴费名单不一致、缺少每人应缴、学生已缴超过应缴、在线缴费未归属 |
 | 在线支付 | 已支付未核销、超 24h 未支付、核销记录找不到订单/指向已删账目 |
-| 凭证图片 | 孤儿图片、指向不存在账目、原图文件缺失 |
+| 凭证图片 | 孤儿图片、指向不存在账目、原图文件缺失（可回退/仅缩略图） |
+| 备份恢复 | 无备份、备份过期、备份包损坏 |
 | 账目与账号 | 金额/日期异常、疑似重复、用户绑定了失效花名册学生 |
 | 账号安全 | 未完成首次改密、管理员未启用两步验证、封禁账号 |
 
-可安全处理的项提供一键修复（重新结账、回填学期归属/每人应缴、核销已支付订单、关闭超时订单、清理孤儿凭证、修复花名册绑定），全部写入操作日志。
+可安全处理的项提供一键修复（重新结账、回填学期归属/每人应缴、核销已支付订单、关闭超时订单、清理孤儿凭证、修复凭证路径/标记仅缩略图、立即备份、修复花名册绑定），修复前自动整站备份，全部写入操作日志。
 
 ## 🔐 两步验证与账号安全
 
@@ -427,10 +455,26 @@ GitHub Release → 下载 ZIP → 全站自动备份 → 解压覆盖 → 完成
 
 ---
 
+## 🛠️ 开发与测试
+
+> Node.js 仅用于前端构建与测试，线上运行不依赖 Node。
+
+```bash
+php tools/smoke.php                 # 纯函数冒烟
+node tools/check-js.js              # 全部 JS 语法
+npm ci && npm run build:app         # 修改 src-js/app.js 后重新构建 assets/js/app.js
+bash tests/run.sh                   # MySQL 集成测试（40+ 断言）
+```
+
+- **不要直接编辑** `assets/js/app.js`：它是 `src-js/app.js` 经 esbuild 压缩的产物；改源码后执行 `npm run build:app`。
+- 集成测试默认创建临时库 `classfund_test`，需要 MySQL 客户端；CI 使用 MySQL 8.0 service，详见 `.github/workflows/ci.yml`。
+- CI 会校验「重新构建后的 app.js 与提交一致」，防止源码与产物漂移。
+
 ## 📌 版本历史
 
 | 版本 | 说明 |
 |:---:|------|
+| **v1.13.0** | ✨ 数据库 + uploads 一键备份/恢复/定时任务 · 🖼️ 凭证自愈（Web 回退/哈希/去 EXIF/缩略图回退）· 🩺 体检忽略/预演/修复前备份/定时告警 · 🛡️ 管理员 2FA 强制策略 · 🧾 审计 Diff + 归档行锁定 · 🧪 MySQL 集成测试进 CI · ⚙️ app.js 可读源码 + esbuild 构建 |
 | **v1.12.0** | ✨ 真学期结转（归档快照 / 期初承接 / 冻结 / 重新结账）· 🩺 数据体检/对账中心 · 🔐 TOTP 两步验证与强制改密 · 📥 导入批次/去重/撤销 · 🧰 统一费用账本、拆分支付模块、同步 schema、回收站资源清理、凭证与代缴权限收紧 |
 | **v1.11.4** | 🐛 班费收缴轮次支持「先建轮次、0 人 0 元」；进入收缴默认全部缴纳；校验提示改为明确原因（不再笼统报「无效金额」） |
 | **v1.11.3** | 🐛 修复「绑定管理员 验证码」被学生绑定指令抢匹配（提示"未找到学生「管理员 xxx」"）；无验证码时给出用法提示 |

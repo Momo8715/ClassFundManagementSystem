@@ -123,7 +123,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     </script>
     <!-- 预加载关键资源：提前建立连接/加载JS，减少等待 -->
     <link rel="preload" href="assets/css/style.css?v=18" as="style">
-    <link rel="preload" href="assets/js/app.js?v=43" as="script">
+    <link rel="preload" href="assets/js/app.js?v=44" as="script">
     <link rel="preconnect" href="/" crossorigin>
     <script data-cfasync="false">
     // 防止 app.js 未就绪时点击登录报错：按钮先禁用，JS 加载后启用
@@ -540,6 +540,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     </div>
                 </div>
                 <div class="cards" id="healthSummary"></div>
+                <div id="healthAckBar" style="margin-bottom:10px"></div>
                 <div id="healthSections"></div>
             </div>
             <?php endif; ?>
@@ -647,6 +648,8 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <button class="btn btn-primary btn-sm" data-tabbtn="pay" onclick="window._tab('cfgTabs','pay')">💳 支付通道</button>
                     <button class="btn btn-outline btn-sm" data-tabbtn="robot" onclick="window._tab('cfgTabs','robot')">📣 群机器人</button>
                     <button class="btn btn-outline btn-sm" data-tabbtn="upgrade" onclick="window._tab('cfgTabs','upgrade')">🔄 远程升级</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="backup" onclick="window._tab('cfgTabs','backup');window._backupLoad&&window._backupLoad()">💾 数据备份</button>
+                    <button class="btn btn-outline btn-sm" data-tabbtn="securityPolicy" onclick="window._tab('cfgTabs','securityPolicy');window._twofaPolicyLoad&&window._twofaPolicyLoad()">🛡️ 安全策略</button>
                 </div>
                 <div id="cfgTabs">
                     <div class="tab-pane" data-pane="pay">
@@ -821,6 +824,18 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                         <span id="upgradeStatus" style="margin-left:12px;font-size:13px"></span>
                     </div>
                     </div>
+                    <div class="tab-pane" data-pane="backup" style="display:none">
+                        <h4 style="margin:16px 0 8px;color:var(--primary)">💾 数据备份 / 恢复</h4>
+                        <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
+                            <div id="backupPanel"><div class="empty" style="padding:14px">加载备份列表…</div></div>
+                        </div>
+                    </div>
+                    <div class="tab-pane" data-pane="securityPolicy" style="display:none">
+                        <h4 style="margin:16px 0 8px;color:var(--primary)">🛡️ 管理员两步验证策略</h4>
+                        <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
+                            <div id="twofaPolicyPanel"><div class="empty" style="padding:14px">加载策略…</div></div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <?php endif; ?>
@@ -966,6 +981,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
             'student_name' => (string)($_SESSION['student_name'] ?? ''),
             'totp_enabled' => !empty($_SESSION['totp_enabled']),
             'must_change_password' => !empty($_SESSION['must_change_password']),
+            'must_enable_2fa' => !empty($_SESSION['must_enable_2fa']),
         ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         window._initialCsrf = <?php echo json_encode($_SESSION['csrf_token'] ?? '', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         window._canFixHealth = <?php echo hasPermission('manageAllAccounts') ? 'true' : 'false'; ?>;
@@ -974,7 +990,8 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <?php endif; ?>
 
     <!-- 应用脚本 -->
-    <script src="assets/js/app.js?v=43" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=43')"></script>
+    <script src="assets/js/common.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/app.js?v=44" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=44')"></script>
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
     <script src="assets/js/security.js?v=5" defer data-cfasync="false"></script>
     <!-- 在线支付面板（v1.8.1） -->
@@ -993,6 +1010,11 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <script src="assets/js/import-batches.js?v=1" defer data-cfasync="false"></script>
     <script src="assets/js/health.js?v=1" defer data-cfasync="false"></script>
     <script src="assets/js/admin-users.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/backup.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/policy.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/archive-lock.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/log-diff.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/legacy-image.js?v=1" defer data-cfasync="false"></script>
 
     <?php if ($loggedIn): ?>
     <script data-cfasync="false">

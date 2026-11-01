@@ -258,14 +258,28 @@ function autoMigrate(): void {
             thumb MEDIUMBLOB NOT NULL COMMENT '缩略图(最长边400px,JPEG)',
             full MEDIUMBLOB NOT NULL COMMENT '原图(旧数据兼容,新图存文件)',
             full_path VARCHAR(500) DEFAULT NULL COMMENT '原图文件路径(新方案:uploads/receipts/)',
+            sha256 CHAR(64) DEFAULT NULL COMMENT '文件/内容校验',
+            byte_size INT UNSIGNED DEFAULT NULL COMMENT '原图字节数',
+            px_width INT UNSIGNED DEFAULT NULL,
+            px_height INT UNSIGNED DEFAULT NULL,
+            web MEDIUMBLOB NULL COMMENT 'Web压缩版(原文件丢失时回退)',
+            web_mime VARCHAR(50) DEFAULT NULL COMMENT 'Web压缩版MIME',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            KEY idx_tx (transaction_id)
+            KEY idx_tx (transaction_id),
+            KEY idx_sha (sha256)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='凭证图片(数据库存储)'");
 
         // tx_images.full_path（v1.7 新增：原图改存 uploads/receipts/ 文件，数据库只存缩略图+路径）
         // 注意：老版本升级时会走到这里补列；缺少此迁移会导致保存凭证图片报 Unknown column 'full_path'
         $tiCols = $db->query("SHOW COLUMNS FROM tx_images")->fetchAll(PDO::FETCH_COLUMN);
         if (!in_array('full_path', $tiCols)) $db->exec("ALTER TABLE tx_images ADD COLUMN full_path VARCHAR(500) DEFAULT NULL COMMENT '原图文件路径' AFTER full");
+        // v1.13：凭证完整性/自愈字段
+        if (!in_array('sha256', $tiCols)) $db->exec("ALTER TABLE tx_images ADD COLUMN sha256 CHAR(64) DEFAULT NULL COMMENT '文件/内容校验' AFTER full_path");
+        if (!in_array('byte_size', $tiCols)) $db->exec("ALTER TABLE tx_images ADD COLUMN byte_size INT UNSIGNED DEFAULT NULL COMMENT '原图字节数' AFTER sha256");
+        if (!in_array('px_width', $tiCols)) $db->exec("ALTER TABLE tx_images ADD COLUMN px_width INT UNSIGNED DEFAULT NULL AFTER byte_size");
+        if (!in_array('px_height', $tiCols)) $db->exec("ALTER TABLE tx_images ADD COLUMN px_height INT UNSIGNED DEFAULT NULL AFTER px_width");
+        if (!in_array('web', $tiCols)) $db->exec("ALTER TABLE tx_images ADD COLUMN web MEDIUMBLOB NULL COMMENT 'Web压缩版(原文件丢失时回退)' AFTER px_height");
+        if (!in_array('web_mime', $tiCols)) $db->exec("ALTER TABLE tx_images ADD COLUMN web_mime VARCHAR(50) DEFAULT NULL COMMENT 'Web压缩版MIME' AFTER web");
 
         // blocked_ips 登录 IP 黑名单（v1.8）
         $db->exec("CREATE TABLE IF NOT EXISTS blocked_ips (
@@ -440,6 +454,37 @@ function autoMigrate(): void {
             }
         } catch (\Exception $e) { /* 忽略，不阻断升级 */ }
 
+        // health_ack 数据体检「已知问题」忽略记录（v1.13）
+        $db->exec("CREATE TABLE IF NOT EXISTS health_ack (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            item_key VARCHAR(191) NOT NULL COMMENT 'code:target',
+            code VARCHAR(64) NOT NULL,
+            target VARCHAR(191) NOT NULL DEFAULT '',
+            reason VARCHAR(255) DEFAULT NULL,
+            created_by INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME DEFAULT NULL,
+            UNIQUE KEY uk_item (item_key),
+            KEY idx_expires (expires_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='数据体检忽略项'");
+
+        // backup_runs 备份执行记录（v1.13）
+        $db->exec("CREATE TABLE IF NOT EXISTS backup_runs (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            filename VARCHAR(191) NOT NULL,
+            file_size BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            db_tables INT NOT NULL DEFAULT 0,
+            uploads_count INT NOT NULL DEFAULT 0,
+            sha256 CHAR(64) DEFAULT NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'success',
+            error VARCHAR(500) DEFAULT NULL,
+            trigger_type VARCHAR(50) NOT NULL DEFAULT 'manual',
+            created_by INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_filename (filename),
+            KEY idx_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='备份执行记录'");
+
         // import_batches 导入批次（v1.12：整批撤销/追溯）
         $db->exec("CREATE TABLE IF NOT EXISTS import_batches (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -510,7 +555,7 @@ define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
 // 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
 // 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
-define('SCHEMA_VERSION', '1.19');
+define('SCHEMA_VERSION', '1.20');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([
@@ -875,6 +920,16 @@ function requireLogin() {
         if (!in_array($action, $allowed, true)) {
             http_response_code(403);
             echo json_encode(['error' => '首次登录请先修改密码', 'must_change_password' => true], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    }
+    // v1.13：管理员 2FA 宽限期已过且未启用，限制其他接口，只留启用 2FA 的入口
+    if (!empty($_SESSION['must_enable_2fa'])) {
+        $action = (string)($_GET['action'] ?? '');
+        $allowed = ['me', 'twofa_setup', 'twofa_policy', 'logout', 'change_password'];
+        if (!in_array($action, $allowed, true)) {
+            http_response_code(403);
+            echo json_encode(['error' => '系统要求管理员开启两步验证，请先在「账号安全」中启用', 'must_enable_2fa' => true], JSON_UNESCAPED_UNICODE);
             exit;
         }
     }

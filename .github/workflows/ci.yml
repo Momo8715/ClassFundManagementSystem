@@ -19,7 +19,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: mbstring, zip, gd, intl
+          extensions: mbstring, zip, gd, intl, pdo_mysql, fileinfo, exif
           coverage: none
 
       - name: PHP lint
@@ -28,5 +28,61 @@ jobs:
           find . -type f -name '*.php' -not -path './.git/*' -print0 \
             | xargs -0 -n1 php -l
 
+      - name: Setup Node（前端构建校验）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend build deps
+        run: npm ci
+
+      - name: Rebuild app.js and verify committed build
+        run: |
+          npm run build:app
+          git diff --exit-code -- assets/js/app.js
+
+      - name: JS syntax check
+        run: node tools/check-js.js
+
       - name: Smoke tests
         run: php tools/smoke.php
+
+  integration:
+    name: 集成测试（MySQL + 备份/恢复/2FA/归档）
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: classfund_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_NAME: classfund_test
+      DB_USER: root
+      DB_PASS: root
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, zip, gd, intl, pdo_mysql, fileinfo, exif
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run integration tests
+        run: bash tests/run.sh

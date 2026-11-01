@@ -198,17 +198,40 @@ function healthCheckImages(): array {
                 ['count' => $ghost], 'cleanup_orphan_images');
         }
 
-        $rows = db()->query("SELECT id, full_path FROM tx_images WHERE full_path IS NOT NULL AND full_path<>'' LIMIT 500")->fetchAll();
-        $missing = 0;
+        $rows = db()->query("SELECT id, full_path, sha256,
+            OCTET_LENGTH(web) AS web_len, OCTET_LENGTH(`full`) AS full_len
+            FROM tx_images WHERE full_path IS NOT NULL AND full_path<>'' LIMIT 500")->fetchAll();
+        $recoverable = [];
+        $lost = [];
+        $checksumBad = [];
         foreach ($rows as $r) {
             $rel = (string)$r['full_path'];
-            if ($rel === '' || strpos($rel, '..') !== false) continue;
-            if (!is_file(dirname(__DIR__) . '/' . $rel)) $missing++;
+            $abs = receiptSafePath($rel);
+            if (!$abs) continue;
+            if (is_file($abs)) {
+                if (!empty($r['sha256'])) {
+                    $h = @hash_file('sha256', $abs);
+                    if ($h !== false && !hash_equals((string)$r['sha256'], (string)$h)) $checksumBad[] = (int)$r['id'];
+                }
+                continue;
+            }
+            if ((int)$r['web_len'] > 0 || (int)$r['full_len'] > 0) $recoverable[] = (int)$r['id'];
+            else $lost[] = (int)$r['id'];
         }
-        if ($missing > 0) {
-            $items[] = healthIssue('image_file_missing', '凭证原图文件缺失', 'warn',
-                $missing . ' 张凭证的原图文件不存在（缩略图仍可查看）；可尝试回退到数据库原图',
-                ['count' => $missing], 'repair_image_paths');
+        if (!empty($recoverable)) {
+            $items[] = healthIssue('image_file_missing_recoverable', '凭证原图文件缺失（可回退）', 'warn',
+                count($recoverable) . ' 张原图文件不存在，但数据库里还有 Web 版/旧原图，可清掉失效路径并回退显示',
+                ['ids' => $recoverable, 'count' => count($recoverable)], 'repair_image_paths');
+        }
+        if (!empty($lost)) {
+            $items[] = healthIssue('image_file_missing_lost', '凭证原图已丢失（仅缩略图）', 'warn',
+                count($lost) . ' 张原图文件不存在，且数据库没有 Web 版/旧原图，只能保留缩略图；可从旧备份恢复，或标记为仅缩略图',
+                ['ids' => $lost, 'count' => count($lost)], 'mark_thumbnail_only');
+        }
+        if (!empty($checksumBad)) {
+            $items[] = healthIssue('image_checksum_mismatch', '凭证文件校验不一致', 'warn',
+                count($checksumBad) . ' 张凭证文件的 sha256 与入库记录不一致，可能被替换或损坏',
+                ['ids' => $checksumBad, 'count' => count($checksumBad)]);
         }
     } catch (\Exception $e) {
         $items[] = healthIssue('image_check_failed', '凭证检查失败', 'warn', $e->getMessage());
@@ -274,13 +297,24 @@ function healthCheckAccounts(): array {
             $items[] = healthIssue('user_must_change_password', '账号仍使用初始密码', 'info',
                 $must . ' 个账号尚未完成首次改密（登录后会被强制要求修改）', ['count' => $must]);
         }
+        $policy = twofaPolicy();
         $admins = db()->query("SELECT id, username, roles FROM users
             WHERE (roles LIKE '%admin%' OR roles LIKE '%head_teacher%') AND (totp_enabled IS NULL OR totp_enabled=0)
             LIMIT 20")->fetchAll();
         foreach ($admins as $u) {
-            $items[] = healthIssue('admin_no_2fa', '管理员未启用两步验证', 'warn',
-                $u['username'] . ' 具备较高权限，建议在「账号安全」中启用两步验证',
-                ['user_id' => (int)$u['id']]);
+            if ($policy['enabled'] && $policy['expired']) {
+                $items[] = healthIssue('admin_no_2fa_policy', '管理员未启用两步验证（策略已到期）', 'error',
+                    $u['username'] . ' 未启用 2FA，系统策略宽限期已过，该账号的其他接口已被限制',
+                    ['user_id' => (int)$u['id']]);
+            } elseif ($policy['enabled']) {
+                $items[] = healthIssue('admin_no_2fa_policy', '管理员未启用两步验证（策略宽限期内）', 'warn',
+                    $u['username'] . ' 需在 ' . $policy['grace_until'] . ' 前启用 2FA',
+                    ['user_id' => (int)$u['id']]);
+            } else {
+                $items[] = healthIssue('admin_no_2fa', '管理员未启用两步验证', 'warn',
+                    $u['username'] . ' 具备较高权限，建议在「账号安全」中启用两步验证',
+                    ['user_id' => (int)$u['id']]);
+            }
         }
         $banned = (int)db()->query("SELECT COUNT(*) FROM users WHERE banned=1")->fetchColumn();
         if ($banned > 0) {
@@ -292,30 +326,115 @@ function healthCheckAccounts(): array {
     return $items;
 }
 
+function healthCheckBackup(): array {
+    $items = [];
+    try {
+        $files = backupListFiles();
+        if (empty($files)) {
+            $items[] = healthIssue('backup_none', '还没有数据备份', 'error',
+                '数据库与 uploads 尚未备份；迁移、误删或磁盘故障时无法恢复', ['count' => 0], 'run_backup');
+        } else {
+            $last = $files[0];
+            $ts = strtotime((string)($last['mtime'] ?? '')) ?: 0;
+            $ageH = $ts > 0 ? (int)floor((time() - $ts) / 3600) : 999;
+            if ($last['status'] !== 'ok') {
+                $items[] = healthIssue('backup_invalid', '最近备份包损坏', 'error',
+                    '备份 ' . $last['filename'] . ' 的 manifest 无法读取，请重新备份', ['file' => $last['filename']], 'run_backup');
+            } elseif ($ageH > 48) {
+                $items[] = healthIssue('backup_stale', '数据备份已过期', 'warn',
+                    '最近备份在 ' . $ageH . ' 小时前（' . $last['mtime'] . '），建议至少每天一次', ['file' => $last['filename']], 'run_backup');
+            }
+        }
+        $r = backupRetention();
+        if ($r < 7) {
+            $items[] = healthIssue('backup_retention_low', '备份保留数量偏少', 'info',
+                '当前只保留 ' . $r . ' 份，建议 7-30 份（配置管理 → 数据备份）', ['retention' => $r]);
+        }
+    } catch (\Throwable $e) {
+        $items[] = healthIssue('backup_check_failed', '备份检查失败', 'warn', $e->getMessage());
+    }
+    return $items;
+}
+
 // ==================== 接口 ====================
 
-function handleHealthCheck() {
-    requirePermission('viewHealth');
-    $sections = [
+function healthAckTarget(array $it): string {
+    $m = $it['meta'] ?? [];
+    if (!is_array($m)) return '';
+    foreach (['semester_id', 'tx_id', 'order_id', 'order_no', 'fee_payment_id', 'user_id', 'a', 'b'] as $k) {
+        if (isset($m[$k]) && is_scalar($m[$k])) return $k . ':' . $m[$k];
+    }
+    if (isset($m['ids']) && is_array($m['ids']) && !empty($m['ids'])) return 'ids:' . implode(',', array_map('intval', $m['ids']));
+    return '';
+}
+
+function healthAckKey(array $it): string {
+    return mb_substr((string)($it['code'] ?? 'unknown') . ':' . healthAckTarget($it), 0, 191);
+}
+
+function healthAckMap(): array {
+    $out = [];
+    try {
+        foreach (db()->query("SELECT item_key FROM health_ack WHERE expires_at IS NULL OR expires_at > NOW()")->fetchAll(PDO::FETCH_COLUMN) as $k) {
+            $out[(string)$k] = true;
+        }
+    } catch (\Exception $e) { /* 表缺失 */ }
+    return $out;
+}
+
+function healthBuildSections(): array {
+    return [
         healthSection('semester', '学期与结转', healthCheckSemesters()),
         healthSection('fee', '班费轮次与缴费', healthCheckFeeRounds()),
         healthSection('payment', '在线支付与核销', healthCheckPayments()),
+        healthSection('backup', '备份与恢复', healthCheckBackup()),
         healthSection('image', '凭证图片', healthCheckImages()),
         healthSection('data', '账目与账号绑定', healthCheckData()),
         healthSection('account', '账号安全', healthCheckAccounts()),
     ];
+}
+
+/** 给 item 加 key，并按 health_ack 过滤；返回 [sections, ignored] */
+function healthApplyAcks(array $sections): array {
+    $acks = healthAckMap();
+    $ignored = 0;
+    foreach ($sections as &$sec) {
+        $kept = [];
+        foreach ($sec['items'] as &$it) {
+            $it['key'] = healthAckKey($it);
+            if (isset($acks[$it['key']])) { $ignored++; continue; }
+            $kept[] = $it;
+        }
+        unset($it);
+        $sec['items'] = $kept;
+        $sec['count'] = count($kept);
+    }
+    unset($sec);
+    return [$sections, $ignored];
+}
+
+function healthIssueSummary(array $sections): array {
     $summary = ['error' => 0, 'warn' => 0, 'info' => 0, 'total' => 0];
     foreach ($sections as $sec) {
         foreach ($sec['items'] as $it) {
-            $s = (string)($it['severity'] ?? 'info');
-            if (!isset($summary[$s])) $summary[$s] = 0;
-            $summary[$s]++;
+            $sev = (string)($it['severity'] ?? 'info');
+            if (!isset($summary[$sev])) $summary[$sev] = 0;
+            $summary[$sev]++;
             $summary['total']++;
         }
     }
+    return $summary;
+}
+
+function handleHealthCheck() {
+    requirePermission('viewHealth');
+    $sections = healthBuildSections();
+    [$sections, $ignored] = healthApplyAcks($sections);
+    $summary = healthIssueSummary($sections);
     jsonOutput([
         'checked_at' => date('Y-m-d H:i:s'),
         'summary' => $summary,
+        'ignored' => $ignored,
         'sections' => $sections,
         'fixes' => [
             'recompute_snapshot' => '重新结账归档学期',
@@ -325,9 +444,102 @@ function handleHealthCheck() {
             'close_stale_orders' => '关闭超时未支付订单',
             'cleanup_orphan_images' => '清理孤儿凭证',
             'repair_image_paths' => '修复凭证路径',
+            'mark_thumbnail_only' => '标记为仅缩略图',
             'repair_roster_bindings' => '修复花名册绑定',
+            'run_backup' => '立即备份',
         ],
     ]);
+}
+
+function handleHealthAck() {
+    requirePermission('manageAllAccounts');
+    requireCsrfToken();
+    $input = jsonInput();
+    $key = mb_substr(trim((string)($input['item_key'] ?? '')), 0, 191);
+    if ($key === '') jsonOutput(['error' => '缺少 item_key'], 400);
+    $reason = mb_substr(trim((string)($input['reason'] ?? '')), 0, 255);
+    $days = (int)($input['days'] ?? 30);
+    if ($days < 1 || $days > 365) $days = 30;
+    $expires = date('Y-m-d H:i:s', time() + $days * 86400);
+    $user = currentUser();
+    try {
+        db()->prepare("INSERT INTO health_ack (item_key, code, target, reason, created_by, expires_at)
+            VALUES (:k, :c, :t, :r, :u, :e)
+            ON DUPLICATE KEY UPDATE reason=VALUES(reason), created_by=VALUES(created_by), expires_at=VALUES(expires_at), created_at=NOW()")
+            ->execute([
+                ':k' => $key,
+                ':c' => mb_substr((string)($input['code'] ?? ''), 0, 64),
+                ':t' => mb_substr((string)($input['target'] ?? ''), 0, 191),
+                ':r' => $reason ?: null,
+                ':u' => (int)$user['id'],
+                ':e' => $expires,
+            ]);
+    } catch (\Exception $e) {
+        jsonOutput(['error' => '保存忽略记录失败：' . $e->getMessage()], 500);
+    }
+    addLog((int)$user['id'], (string)$user['username'], 'health_ack', 'system', null, ['key' => $key, 'days' => $days, 'reason' => $reason]);
+    jsonOutput(['ok' => true, 'expires_at' => $expires]);
+}
+
+function handleHealthUnack() {
+    requirePermission('manageAllAccounts');
+    requireCsrfToken();
+    $input = jsonInput();
+    if (!empty($input['all'])) {
+        db()->exec("DELETE FROM health_ack");
+        jsonOutput(['ok' => true, 'all' => true]);
+    }
+    $key = mb_substr(trim((string)($input['item_key'] ?? '')), 0, 191);
+    if ($key === '') jsonOutput(['error' => '缺少 item_key'], 400);
+    db()->prepare("DELETE FROM health_ack WHERE item_key=:k")->execute([':k' => $key]);
+    jsonOutput(['ok' => true]);
+}
+
+/** 修复动作预演：只统计，不改数据 */
+function healthFixPlan(string $action): array {
+    $plan = ['action' => $action];
+    if ($action === 'recompute_snapshot') {
+        $plan['semesters'] = (int)db()->query("SELECT COUNT(*) FROM semesters WHERE status='archived'")->fetchColumn();
+    } elseif ($action === 'backfill_semester') {
+        $plan['transactions'] = (int)db()->query("SELECT COUNT(*) FROM transactions t
+            WHERE t.deleted_at IS NULL AND (t.semester_id IS NULL OR t.semester_id=0)
+            AND EXISTS (SELECT 1 FROM semesters s WHERE t.date BETWEEN s.start_date AND s.end_date)")->fetchColumn();
+    } elseif ($action === 'backfill_per_person') {
+        $plan['rounds'] = (int)db()->query("SELECT COUNT(*) FROM transactions
+            WHERE sub_category='班费收缴' AND (per_person IS NULL OR per_person<=0)")->fetchColumn();
+    } elseif ($action === 'settle_paid_orders') {
+        $r = db()->query("SELECT COUNT(*) c, COALESCE(SUM(amount),0) a FROM payment_orders WHERE status='paid' AND settled=0")->fetch();
+        $plan['orders'] = (int)($r['c'] ?? 0);
+        $plan['amount'] = round((float)($r['a'] ?? 0), 2);
+    } elseif ($action === 'close_stale_orders') {
+        $plan['orders'] = (int)db()->query("SELECT COUNT(*) FROM payment_orders WHERE status='pending' AND created_at < (NOW() - INTERVAL 24 HOUR)")->fetchColumn();
+    } elseif ($action === 'cleanup_orphan_images') {
+        $plan['images'] = (int)db()->query("SELECT COUNT(*) FROM tx_images ti
+            LEFT JOIN transactions t ON t.id=ti.transaction_id
+            WHERE (ti.transaction_id=0 AND ti.created_at < (NOW() - INTERVAL 24 HOUR))
+               OR (ti.transaction_id>0 AND t.id IS NULL)")->fetchColumn();
+    } elseif ($action === 'repair_image_paths' || $action === 'mark_thumbnail_only') {
+        $rows = db()->query("SELECT id, full_path, OCTET_LENGTH(web) web_len, OCTET_LENGTH(`full`) full_len
+            FROM tx_images WHERE full_path IS NOT NULL AND full_path<>'' LIMIT 2000")->fetchAll();
+        $n = 0;
+        foreach ($rows as $r) {
+            $abs = receiptSafePath((string)$r['full_path']);
+            if (!$abs || is_file($abs)) continue;
+            $hasFallback = ((int)$r['web_len'] > 0 || (int)$r['full_len'] > 0);
+            if ($action === 'repair_image_paths' && $hasFallback) $n++;
+            if ($action === 'mark_thumbnail_only' && !$hasFallback) $n++;
+        }
+        $plan['images'] = $n;
+    } elseif ($action === 'run_backup') {
+        $plan['note'] = '创建数据库 + uploads 全量备份';
+    } elseif ($action === 'repair_roster_bindings') {
+        $plan['invalid'] = (int)db()->query("SELECT COUNT(*) FROM users u LEFT JOIN class_roster r ON r.id=u.roster_id
+            WHERE u.roster_id IS NOT NULL AND u.roster_id>0 AND r.id IS NULL")->fetchColumn();
+        $plan['unbound'] = (int)db()->query("SELECT COUNT(*) FROM users WHERE (roster_id IS NULL OR roster_id=0) AND roles LIKE '%student%'")->fetchColumn();
+    } else {
+        throw new \InvalidArgumentException('不支持的修复动作');
+    }
+    return $plan;
 }
 
 function handleHealthFix() {
@@ -337,6 +549,26 @@ function handleHealthFix() {
     $action = (string)($input['action'] ?? '');
     $user = currentUser();
     $result = ['action' => $action];
+
+    try {
+        $plan = healthFixPlan($action);
+    } catch (\Throwable $e) {
+        jsonOutput(['error' => $e->getMessage()], 400);
+    }
+    if (!empty($input['dry_run'])) {
+        jsonOutput(['ok' => true, 'dry_run' => true, 'plan' => $plan]);
+    }
+
+    // 破坏性修复前自动整站备份（含 uploads），备份失败则中止
+    $destructive = ['cleanup_orphan_images', 'repair_image_paths', 'mark_thumbnail_only', 'settle_paid_orders', 'repair_roster_bindings'];
+    if (in_array($action, $destructive, true) && function_exists('backupCreate')) {
+        try {
+            $b = backupCreate((int)$user['id'], 'pre_health_' . $action);
+            $result['backup'] = $b['filename'];
+        } catch (\Throwable $e) {
+            jsonOutput(['error' => '修复前自动备份失败，已中止：' . $e->getMessage()], 500);
+        }
+    }
 
     try {
         if ($action === 'recompute_snapshot') {
@@ -397,15 +629,35 @@ function handleHealthFix() {
             }
             $result['images'] = $n; $result['files'] = $files;
         } elseif ($action === 'repair_image_paths') {
-            $rows = db()->query("SELECT id, full_path, OCTET_LENGTH(`full`) AS full_len FROM tx_images WHERE full_path IS NOT NULL AND full_path<>'' LIMIT 1000")->fetchAll();
+            $rows = db()->query("SELECT id, full_path, OCTET_LENGTH(web) AS web_len, OCTET_LENGTH(`full`) AS full_len
+                FROM tx_images WHERE full_path IS NOT NULL AND full_path<>'' LIMIT 1000")->fetchAll();
             $upd = db()->prepare("UPDATE tx_images SET full_path=NULL WHERE id=:id");
             $n = 0;
             foreach ($rows as $r) {
-                $rel = (string)$r['full_path'];
-                if ($rel === '' || strpos($rel, '..') !== false) continue;
-                if (!is_file(dirname(__DIR__) . '/' . $rel) && (int)$r['full_len'] > 0) { $upd->execute([':id' => (int)$r['id']]); $n++; }
+                $abs = receiptSafePath((string)$r['full_path']);
+                if (!$abs) continue;
+                if (!is_file($abs) && ((int)$r['full_len'] > 0 || (int)$r['web_len'] > 0)) {
+                    $upd->execute([':id' => (int)$r['id']]); $n++;
+                }
             }
             $result['count'] = $n;
+        } elseif ($action === 'mark_thumbnail_only') {
+            // 原图已彻底丢失：清掉失效路径，避免健康检查一直提示；查看时回退缩略图
+            $rows = db()->query("SELECT id, full_path, OCTET_LENGTH(web) AS web_len, OCTET_LENGTH(`full`) AS full_len
+                FROM tx_images WHERE full_path IS NOT NULL AND full_path<>'' LIMIT 1000")->fetchAll();
+            $upd = db()->prepare("UPDATE tx_images SET full_path=NULL WHERE id=:id");
+            $n = 0;
+            foreach ($rows as $r) {
+                $abs = receiptSafePath((string)$r['full_path']);
+                if (!$abs) continue;
+                if (!is_file($abs) && (int)$r['full_len'] <= 0 && (int)$r['web_len'] <= 0) {
+                    $upd->execute([':id' => (int)$r['id']]); $n++;
+                }
+            }
+            $result['count'] = $n;
+        } elseif ($action === 'run_backup') {
+            $b = backupCreate((int)$user['id'], 'health_fix');
+            $result['backup'] = $b;
         } elseif ($action === 'repair_roster_bindings') {
             $bad = db()->exec("UPDATE users u LEFT JOIN class_roster r ON r.id=u.roster_id
                 SET u.roster_id=NULL WHERE u.roster_id>0 AND r.id IS NULL");

@@ -166,6 +166,7 @@ function handleMe() {
                 'student_name' => '',
                 'totp_enabled' => false,
                 'must_change_password' => false,
+                'must_enable_2fa' => false,
                 'csrf_token'   => $_SESSION['csrf_token'] ?? '',
             ]
         ]);
@@ -182,6 +183,7 @@ function handleMe() {
     $_SESSION['roster_id'] = (int)($row['roster_id'] ?? 0);
     $_SESSION['must_change_password'] = !empty($row['must_change_password']);
     $_SESSION['totp_enabled'] = !empty($row['totp_enabled']);
+    $_SESSION['must_enable_2fa'] = twofaNeedsSetup(sortRolesByPriority(normalizeRoles($row['roles'])), !empty($row['totp_enabled']));
     $studentName = '';
     if ((int)($_SESSION['roster_id']) > 0) {
         $sn = db()->prepare("SELECT name FROM class_roster WHERE id=:id");
@@ -202,6 +204,7 @@ function handleMe() {
             'student_name' => $studentName,
             'totp_enabled' => !empty($row['totp_enabled']),
             'must_change_password' => !empty($row['must_change_password']),
+            'must_enable_2fa' => !empty($_SESSION['must_enable_2fa']),
             'csrf_token'   => $_SESSION['csrf_token'] ?? '',
         ]
     ]);

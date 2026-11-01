@@ -1,0 +1,12 @@
+{
+  "name": "classfund",
+  "private": true,
+  "scripts": {
+    "build:app": "esbuild src-js/app.js --minify --outfile=assets/js/app.js",
+    "check:js": "node tools/check-js.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0",
+    "prettier": "3.3.3"
+  }
+}

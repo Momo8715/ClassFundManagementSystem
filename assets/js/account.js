@@ -71,14 +71,25 @@
       + '</div></div>';
     $('codesCopy').onclick = function () { copyText(codes.join('\n'), this); };
     $('codesDown').onclick = function () { downloadCodes(codes); };
-    $('codesDone').onclick = function () { loadStatus(); };
+    $('codesDone').onclick = function () {
+      if (window._initialUser && window._initialUser.must_enable_2fa) { location.reload(); return; }
+      loadStatus();
+    };
   }
 
   function renderStatus(st) {
     var body = $('accountBody');
     if (!body) return;
     var on = !!st.enabled;
-    var html = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px">'
+    var policyHtml = '';
+    if (st.policy && st.policy.enabled && st.policy_applies) {
+      if (!on) {
+        policyHtml = '<div style="background:' + (st.policy.expired ? '#fef2f2' : '#fffbeb') + ';border:1px solid ' + (st.policy.expired ? '#fecaca' : '#fde68a') + ';color:' + (st.policy.expired ? '#b91c1c' : '#92400e') + ';border-radius:8px;padding:9px 11px;font-size:12px;line-height:1.6;margin-bottom:10px">'
+          + (st.policy.expired ? '⚠️ 系统要求管理员开启两步验证，宽限期已过，当前账号已被限制使用。' : '系统要求管理员在 ' + esc(st.policy.grace_until || '') + ' 前开启两步验证。')
+          + '</div>';
+      }
+    }
+    var html = policyHtml + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px">'
       + '<div><b style="font-size:14px">' + (on ? '✅ 两步验证已开启' : '⚪ 两步验证未开启') + '</b>'
       + '<div style="font-size:11px;color:var(--text-secondary);margin-top:3px">账号：' + esc(st.account || '') + (on ? ' · 剩余备用码 ' + (st.remaining_backup_codes || 0) + ' 个' : '') + '</div></div>'
       + (on ? '<span class="badge badge-income">受保护</span>' : '<span class="badge badge-role">建议开启</span>') + '</div>';
@@ -88,7 +99,7 @@
     } else {
       html += '<div style="display:flex;gap:8px;flex-wrap:wrap">'
         + '<button type="button" class="btn btn-outline btn-sm" id="twofaBackup">🔁 重新生成备用码</button>'
-        + '<button type="button" class="btn btn-danger btn-sm" id="twofaDisable">关闭两步验证</button>'
+        + (st.policy && st.policy.enabled && st.policy_applies ? '' : '<button type="button" class="btn btn-danger btn-sm" id="twofaDisable">关闭两步验证</button>')
         + '</div>';
     }
     body.innerHTML = html;
@@ -223,9 +234,31 @@
     };
   }
 
+
+  // ==================== 管理员 2FA 策略强制 ====================
+  function forceEnable2fa() {
+    var u = window._initialUser;
+    if (!u || !u.id || !u.must_enable_2fa || u.must_change_password) return;
+    var wrap = document.createElement('div');
+    wrap.id = 'force2faPanel';
+    wrap.style.cssText = 'position:fixed;inset:0;z-index:999999;background:rgba(15,23,42,.75);display:flex;align-items:center;justify-content:center;padding:16px';
+    wrap.innerHTML = '<div style="width:430px;max-width:94vw;background:var(--bg-card,#fff);border-radius:14px;padding:24px;box-shadow:0 20px 50px rgba(0,0,0,.3)">'
+      + '<h3 style="margin:0 0 6px;font-size:18px">🔐 管理员需要开启两步验证</h3>'
+      + '<p style="margin:0 0 12px;font-size:12px;color:var(--text-secondary,#64748b);line-height:1.7">系统安全策略已过宽限期。开启后，登录时除密码外还需验证器动态码；请同时保存 8 个备用码。</p>'
+      + '<button type="button" id="force2faGo" class="btn btn-primary" style="width:100%">立即设置两步验证</button>'
+      + '<p style="margin:12px 0 0;font-size:11px;color:var(--text-secondary,#64748b);line-height:1.6">无法使用验证器？请联系另一位管理员，或在服务器运行 <code>php tools/reset_2fa.php --disable-policy</code> 后重新登录。</p>'
+      + '</div>';
+    document.body.appendChild(wrap);
+    $('force2faGo').onclick = function () {
+      wrap.remove();
+      window._accountSecurityOpen && window._accountSecurityOpen();
+    };
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', forcePasswordChange);
+    document.addEventListener('DOMContentLoaded', function () { forcePasswordChange(); forceEnable2fa(); });
   } else {
     forcePasswordChange();
+    forceEnable2fa();
   }
 })();

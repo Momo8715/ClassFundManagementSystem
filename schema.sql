@@ -146,9 +146,47 @@ CREATE TABLE IF NOT EXISTS `tx_images` (
   `thumb`          MEDIUMBLOB NOT NULL COMMENT '缩略图(最长边400px,JPEG)',
   `full`           MEDIUMBLOB NOT NULL COMMENT '原图(旧数据兼容,新图存文件)',
   `full_path`      VARCHAR(500) NULL COMMENT '原图文件路径(新方案:uploads/receipts/)',
+  `sha256`         CHAR(64) DEFAULT NULL COMMENT '文件/内容校验',
+  `byte_size`      INT UNSIGNED DEFAULT NULL COMMENT '原图字节数',
+  `px_width`       INT UNSIGNED DEFAULT NULL,
+  `px_height`      INT UNSIGNED DEFAULT NULL,
+  `web`            MEDIUMBLOB NULL COMMENT 'Web压缩版(原文件丢失时回退)',
+  `web_mime`       VARCHAR(50) DEFAULT NULL COMMENT 'Web压缩版MIME',
   `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  KEY `idx_tx` (`transaction_id`)
+  KEY `idx_tx` (`transaction_id`),
+  KEY `idx_sha` (`sha256`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='凭证图片(数据库存储)';
+
+-- 数据体检「已知问题」忽略记录
+CREATE TABLE IF NOT EXISTS `health_ack` (
+  `id`         INT AUTO_INCREMENT PRIMARY KEY,
+  `item_key`   VARCHAR(191) NOT NULL COMMENT 'code:target',
+  `code`       VARCHAR(64) NOT NULL,
+  `target`     VARCHAR(191) NOT NULL DEFAULT '',
+  `reason`     VARCHAR(255) DEFAULT NULL,
+  `created_by` INT NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` DATETIME DEFAULT NULL,
+  UNIQUE KEY `uk_item` (`item_key`),
+  KEY `idx_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='数据体检忽略项';
+
+-- 备份执行记录
+CREATE TABLE IF NOT EXISTS `backup_runs` (
+  `id`           INT AUTO_INCREMENT PRIMARY KEY,
+  `filename`     VARCHAR(191) NOT NULL,
+  `file_size`    BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `db_tables`    INT NOT NULL DEFAULT 0,
+  `uploads_count` INT NOT NULL DEFAULT 0,
+  `sha256`       CHAR(64) DEFAULT NULL,
+  `status`       VARCHAR(20) NOT NULL DEFAULT 'success',
+  `error`        VARCHAR(500) DEFAULT NULL,
+  `trigger_type` VARCHAR(50) NOT NULL DEFAULT 'manual',
+  `created_by`   INT NOT NULL DEFAULT 0,
+  `created_at`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_filename` (`filename`),
+  KEY `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='备份执行记录';
 
 -- 登录 IP 黑名单（命中后 API 层直接拒绝）
 CREATE TABLE IF NOT EXISTS `blocked_ips` (

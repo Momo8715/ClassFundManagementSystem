@@ -1,1 +1,1 @@
-{"version": "1.12.0", "notes": "自动发布 v1.12.0", "url": "https://github.com/Momo8715/ClassFundManagementSystem/releases/download/v1.12.0/update.zip", "sha256": "7325c56fd3d25ad35dec4763178274481b4eaaf9d38c307f7bcd169a797c617d"}
+{"version":"1.13.0","notes":"数据备份/恢复、凭证自愈、体检闭环、2FA 策略、审计 Diff、集成测试","url":"https://github.com/Momo8715/ClassFundManagementSystem/releases/download/v1.13.0/update.zip"}

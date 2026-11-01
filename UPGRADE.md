@@ -8,6 +8,18 @@
 
 ---
 
+## v1.13 升级注意（先读）
+
+1. **自动迁移**：新增 `tx_images.sha256 / byte_size / px_width / px_height / web / web_mime`、`health_ack`、`backup_runs`；`SCHEMA_VERSION` 升至 1.20。升级后首次访问自动完成。
+2. **先做一次备份**：登录 → 配置管理 → 💾 数据备份 → 立即备份。备份包含数据库全部表 + `uploads/`，恢复前会自动再备份。
+3. **配置定时任务**：把页面上复制的 `cron.php?token=...&task=all` 加到宝塔「计划任务 → Shell 脚本」，建议每天一次；会执行备份、清理孤儿凭证、数据体检（有 error 时按群机器人配置推送）。
+4. **图片访问收紧**：代码已支持 `api.php?action=tx_image&path=...` 读取旧直连图片；建议在 nginx 站点配置加入 `location ^~ /uploads/ { deny all; }`，避免凭证原图绕过登录直连。Apache 下 `uploads/.htaccess` 已默认拒绝直接访问。
+5. **2FA 策略（可选）**：配置管理 → 🛡️ 安全策略 可要求管理员/班主任启用 2FA；宽限期到期后未启用的账号只能访问账号安全/改密/退出。被锁死时可用服务器命令 `php tools/reset_2fa.php --disable-policy`（或 `--user=账号` 清除 2FA）恢复。
+6. **恢复风险**：备份恢复会覆盖数据库与同名 `uploads` 文件，需输入 `RESTORE` 确认；恢复前自动备份文件名会在结果中返回。
+7. **前端缓存**：`app.js` 已由 `src-js/app.js` 经 esbuild 构建（v44），Service Worker 缓存升至 v41；升级后 Ctrl+F5 或清一次 CF 缓存。
+
+---
+
 ## v1.12 升级注意（先读）
 
 1. **自动迁移**：升级后首次访问会自动补列/建表（`users.totp_*` / `must_change_password` / `roster_id`、`transactions.semester_id` / `import_batch`、`semesters` 归档快照列、`import_batches` 表），并回填学期归属与用户绑定；已有归档学期会补一次结账快照。

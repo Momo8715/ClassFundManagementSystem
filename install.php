@@ -120,6 +120,8 @@ if ($step === 1 && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($already && $forceReinstall) {
             // 全新安装：删除全部业务表（含支付/批次/安全表），确保旧数据彻底清除
+            $db->exec("DROP TABLE IF EXISTS backup_runs");
+            $db->exec("DROP TABLE IF EXISTS health_ack");
             $db->exec("DROP TABLE IF EXISTS import_batches");
             $db->exec("DROP TABLE IF EXISTS fee_payments");
             $db->exec("DROP TABLE IF EXISTS payment_orders");
