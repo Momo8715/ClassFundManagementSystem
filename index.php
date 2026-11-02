@@ -964,7 +964,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                         <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">供微信机器人查询花名册 / 缴费情况 / 未缴名单 / 全班汇总，所有请求需带 token。</p>
                         <div style="display:grid;grid-template-columns:110px 1fr;gap:8px 10px;align-items:center;max-width:780px">
                             <label style="font-size:13px">接口地址</label>
-                            <input readonly value="https://classfund.hw.陌沫.cn/?bot_api=1" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                            <input readonly value="https://classfund.hw.陌沫.cn" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
                             <label style="font-size:13px">Token</label>
                             <input readonly value="e56acaf2ce589c77d5ef96bb65b0783b" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
                             <label style="font-size:13px">可用动作</label>
