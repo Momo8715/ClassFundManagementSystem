@@ -34,7 +34,7 @@ if (isset($_GET['bot_api'])) {
 $__action = (string)($_GET['action'] ?? 'ping');
 
 try {
-    switch ($action) {
+    switch ($__action) {
         // 探活
         case 'ping':
             __botOut(['pong' => true, 'time' => date('c'), 'version' => '1.0.0']);
