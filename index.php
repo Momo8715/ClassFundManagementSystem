@@ -111,6 +111,24 @@ try {
                 'items' => array_slice($rows, 0, $limit),
             ]);
 
+        // 绑定 / 查询绑定
+        case 'bind':
+        case 'whoami':
+            $__u = trim((string)($_GET['user'] ?? ''));
+            $__bf = __DIR__ . '/bot_bindings.json';
+            $__ball = is_file($__bf) ? (json_decode((string)file_get_contents($__bf), true) ?: []) : [];
+            if ($__action === 'whoami') {
+                __botOut(['user' => $__u, 'name' => (string)($__ball[$__u]['name'] ?? '')]);
+            }
+            $__n = trim((string)($_GET['name'] ?? ''));
+            if ($__u === '' || $__n === '') __botErr('缺少 user/name');
+            $__hit = null;
+            foreach (feeRoster() as $__s) { if ((string)$__s['name'] === $__n) { $__hit = $__s; break; } }
+            if ($__hit === null) __botErr('花名册中没有「' . $__n . '」', 404);
+            $__ball[$__u] = ['name' => $__n, 'at' => date('c')];
+            file_put_contents($__bf, json_encode($__ball, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
+            __botOut(['user' => $__u, 'name' => $__n]);
+
         // 全班汇总
         case 'summary':
             $all = feeAllStatuses();
