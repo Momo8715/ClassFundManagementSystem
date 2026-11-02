@@ -4,6 +4,149 @@
  */
 require_once __DIR__ . '/config.php';
 
+// 微信机器人只读接口：/?bot_api=1&action=...&token=...
+if (isset($_GET['bot_api'])) {
+    $__botToken = 'e56acaf2ce589c77d5ef96bb65b0783b';
+    $__given = (string)($_SERVER['HTTP_X_BOT_TOKEN'] ?? ($_GET['token'] ?? ''));
+    if ($__given === '' || !hash_equals($__botToken, $__given)) {
+        http_response_code(401);
+        echo json_encode(['ok' => false, 'error' => 'unauthorized'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if (!isDbInstalled()) {
+        http_response_code(503);
+        echo json_encode(['ok' => false, 'error' => '系统未安装'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    autoMigrate();
+    require_once __DIR__ . '/src/fee_ledger.php';
+
+    function __botOut(array $data): void {
+        echo json_encode(['ok' => true, 'data' => $data], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    function __botErr(string $msg, int $code = 400): void {
+        http_response_code($code);
+        echo json_encode(['ok' => false, 'error' => $msg], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+$__action = (string)($_GET['action'] ?? 'ping');
+
+try {
+    switch ($action) {
+        // 探活
+        case 'ping':
+            __botOut(['pong' => true, 'time' => date('c'), 'version' => '1.0.0']);
+
+        // 花名册（用于绑定校验）
+        case 'roster':
+            $names = [];
+            foreach (feeRoster() as $s) $names[] = $s['name'];
+            __botOut(['names' => $names, 'count' => count($names)]);
+
+        // 某个学生的应缴/已缴/待缴
+        case 'status':
+            $name = trim((string)($_GET['name'] ?? ''));
+            if ($name === '') __botErr('缺少 name');
+
+            $roster = feeRoster();
+            $hit = null;
+            foreach ($roster as $s) {
+                if ((string)$s['name'] === $name) { $hit = $s; break; }
+            }
+            if ($hit === null) __botErr('花名册中没有「' . $name . '」', 404);
+
+            $all = feeAllStatuses($roster);
+            $sid = (int)$hit['id'];
+            $st  = $all[$sid] ?? null;
+            if ($st === null) __botErr('未找到该学生的缴费数据', 404);
+
+            // 未缴轮次（按时间倒序）
+            $unpaidRounds = [];
+            foreach (feeRounds(true) as $r) {
+                foreach ($r['unpaid_list'] as $u) {
+                    if ((int)$u['id'] === $sid) {
+                        $unpaidRounds[] = [
+                            'date'        => (string)$r['date'],
+                            'description' => (string)$r['description'],
+                            'per_person'  => (float)$r['per_person'],
+                        ];
+                        break;
+                    }
+                }
+            }
+
+            __botOut([
+                'name'          => (string)$hit['name'],
+                'exempt'        => !empty($hit['exempt']),
+                'due'           => (float)$st['due'],
+                'paid'          => (float)$st['paid'],
+                'outstanding'   => (float)$st['outstanding'],
+                'unpaid_rounds' => $unpaidRounds,
+            ]);
+
+        // 未缴名单（管理员）
+        case 'unpaid':
+            $limit = (int)($_GET['limit'] ?? 100);
+            if ($limit < 1) $limit = 100;
+            if ($limit > 300) $limit = 300;
+
+            $rows = [];
+            foreach (feeAllStatuses() as $st) {
+                $out = (float)($st['outstanding'] ?? 0);
+                if ($out > 0.001) {
+                    $rows[] = [
+                        'name'        => (string)$st['name'],
+                        'outstanding' => $out,
+                        'due'         => (float)$st['due'],
+                        'paid'        => (float)$st['paid'],
+                    ];
+                }
+            }
+            usort($rows, static fn($a, $b) => $b['outstanding'] <=> $a['outstanding']);
+
+            __botOut([
+                'count' => count($rows),
+                'items' => array_slice($rows, 0, $limit),
+            ]);
+
+        // 全班汇总
+        case 'summary':
+            $all = feeAllStatuses();
+            $due = $paid = $outstanding = 0.0;
+            $unpaidCount = 0;
+            $exemptCount = 0;
+            foreach ($all as $st) {
+                if (!empty($st['exempt'])) { $exemptCount++; continue; }
+                $due         += (float)$st['due'];
+                $paid        += (float)$st['paid'];
+                $outstanding += (float)$st['outstanding'];
+                if ((float)$st['outstanding'] > 0.001) $unpaidCount++;
+            }
+            $rounds = feeRounds(false);
+
+            __botOut([
+                'students'     => count($all),
+                'exempt'       => $exemptCount,
+                'due'          => round($due, 2),
+                'paid'         => round($paid, 2),
+                'outstanding'  => round($outstanding, 2),
+                'unpaid_count' => $unpaidCount,
+                'rounds'       => count($rounds),
+                'generated_at' => date('c'),
+            ]);
+
+        default:
+            __botErr('未知 action', 404);
+    }
+} catch (Throwable $e) {
+    error_log('[bot_api] ' . $e->getMessage());
+    __botErr('服务器内部错误', 500);
+}
+
+}
+
 // 未安装时跳转安装向导
 if (!isDbInstalled()) {
     if (strpos($_SERVER['SCRIPT_NAME'], 'install.php') === false) {
@@ -816,7 +959,20 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                             </div>
                         </div>
                     </div>
-                    <div class="tab-pane" data-pane="upgrade" style="display:none">
+                                        <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);max-width:900px;margin-top:16px">
+                        <h4 style="font-size:13px;margin-bottom:8px;color:var(--primary)">🤖 机器人查询接口（只读）</h4>
+                        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">供微信机器人查询花名册 / 缴费情况 / 未缴名单 / 全班汇总，所有请求需带 token。</p>
+                        <div style="display:grid;grid-template-columns:110px 1fr;gap:8px 10px;align-items:center;max-width:780px">
+                            <label style="font-size:13px">接口地址</label>
+                            <input readonly value="https://classfund.hw.陌沫.cn/?bot_api=1" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                            <label style="font-size:13px">Token</label>
+                            <input readonly value="e56acaf2ce589c77d5ef96bb65b0783b" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text)">
+                            <label style="font-size:13px">可用动作</label>
+                            <span style="font-size:12px;color:var(--text-secondary)">ping / roster / status&name=姓名 / unpaid / summary</span>
+                        </div>
+                        <div style="margin-top:10px;font-size:12px;color:var(--text-secondary)">示例：<code>?bot_api=1&action=summary&token=你的token</code></div>
+                    </div>
+<div class="tab-pane" data-pane="upgrade" style="display:none">
                     <h4 style="margin:16px 0 8px;color:var(--primary)">🔄 远程升级</h4>
                     <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);margin-bottom:8px">
                         <button class="btn btn-primary btn-sm" onclick="checkUpdate()">🔍 检查更新</button>
