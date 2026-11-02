@@ -129,6 +129,25 @@ try {
             file_put_contents($__bf, json_encode($__ball, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
             __botOut(['user' => $__u, 'name' => $__n]);
 
+        // 缴费链接
+        case 'paylink':
+            $__u = trim((string)($_GET['user'] ?? ''));
+            $__bf = __DIR__ . '/bot_bindings.json';
+            $__ball = is_file($__bf) ? (json_decode((string)file_get_contents($__bf), true) ?: []) : [];
+            $__name = (string)($__ball[$__u]['name'] ?? '');
+            if ($__name === '') __botErr('该用户尚未绑定姓名', 404);
+            $__sid = 0;
+            foreach (feeRoster() as $__s) { if ((string)$__s['name'] === $__name) { $__sid = (int)$__s['id']; break; } }
+            if (!$__sid) __botErr('花名册中没有该学生', 404);
+            $__st = feeAllStatuses()[$__sid] ?? null;
+            if ($__st === null) __botErr('未找到缴费数据', 404);
+            __botOut([
+                'name' => $__name,
+                'student_id' => $__sid,
+                'outstanding' => (float)$__st['outstanding'],
+                'url' => 'https://classfund.hw.陌沫.cn/?student=' . $__sid . '#page-pay',
+            ]);
+
         // 全班汇总
         case 'summary':
             $all = feeAllStatuses();
