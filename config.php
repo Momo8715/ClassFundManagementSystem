@@ -542,6 +542,43 @@ function autoMigrate(): void {
             if (!in_array('openid', $qbCols))  $db->exec("ALTER TABLE qq_bindings ADD COLUMN openid VARCHAR(191) NOT NULL DEFAULT '' AFTER target");
         } catch (\Exception $e) { /* 忽略 */ }
 
+        // 机器人远端绑定（v1.18：插件/微信机器人 -> 花名册学生，替代 bot_bindings.json）
+        $db->exec("CREATE TABLE IF NOT EXISTS bot_bindings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            channel VARCHAR(20) NOT NULL DEFAULT 'wechat' COMMENT '插件渠道，如 wechat/qq/onebot',
+            remote_user VARCHAR(191) NOT NULL COMMENT '远端用户唯一标识',
+            student_id INT NOT NULL DEFAULT 0,
+            name VARCHAR(50) DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_channel_user (channel, remote_user),
+            KEY idx_student (student_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='机器人远端绑定'");
+
+        // 机器人通知出站队列（v1.18）：支付成功/金额变动/插件通知
+        $db->exec("CREATE TABLE IF NOT EXISTS bot_notifications (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            event VARCHAR(50) NOT NULL COMMENT 'payment_success/amount_change/plugin_notify',
+            dedupe_key VARCHAR(191) DEFAULT NULL COMMENT '幂等键，可空',
+            student_id INT NOT NULL DEFAULT 0,
+            student_name VARCHAR(50) DEFAULT NULL,
+            title VARCHAR(191) NOT NULL DEFAULT '',
+            content TEXT NOT NULL,
+            payload LONGTEXT DEFAULT NULL,
+            scope VARCHAR(20) NOT NULL DEFAULT 'group' COMMENT 'group/plugin/all',
+            status VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT '插件 ack 状态 pending/sent/failed',
+            push_status VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT '站点代推状态 pending/sent/failed/skipped',
+            attempts INT NOT NULL DEFAULT 0,
+            last_error VARCHAR(500) DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            acked_at DATETIME DEFAULT NULL,
+            pushed_at DATETIME DEFAULT NULL,
+            UNIQUE KEY uk_dedupe (dedupe_key),
+            KEY idx_plugin_poll (status, id),
+            KEY idx_push (push_status, id),
+            KEY idx_created (created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='机器人通知队列'");
+
         // ---- 全部迁移完成，记录版本号（异常时不会执行到这里，下次请求会重试） ----
         $db->exec("INSERT INTO system_meta (meta_key, meta_value) VALUES ('schema_version', '" . SCHEMA_VERSION . "')
             ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)");
@@ -555,7 +592,7 @@ define('SITE_NAME', '班级班费管理系统');
 define('SESSION_TIMEOUT', 86400);      // 会话超时（秒）
 // 数据库结构版本：⚠️ 每次修改下方 autoMigrate() 的迁移逻辑时，必须同步递增此值，
 // 否则线上库会跳过新增的迁移。版本一致时每次请求不再执行迁移检查（性能优化）。
-define('SCHEMA_VERSION', '1.20');
+define('SCHEMA_VERSION', '1.21');
 
 // ========== 角色定义（按优先级从高到低排列） ==========
 define('ROLES', json_encode([
@@ -649,6 +686,22 @@ function setMeta(string $key, string $value): void {
     db()->prepare("INSERT INTO system_meta (meta_key, meta_value) VALUES (:k, :v)
         ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)")
         ->execute([':k' => $key, ':v' => $value]);
+}
+
+// ========== 机器人接口 Token（v1.18；保留旧 token 兼容现有插件） ==========
+define('BOT_API_LEGACY_TOKEN', 'e56acaf2ce589c77d5ef96bb65b0783b');
+
+/** 当前机器人接口 token：优先 system_meta，未设置时沿用旧 token */
+function botApiToken(): string {
+    $t = trim(getMeta('bot_api_token', ''));
+    return $t !== '' ? $t : BOT_API_LEGACY_TOKEN;
+}
+
+/** 生成并保存新的机器人 token（仅管理员接口调用） */
+function botApiRotateToken(): string {
+    $t = bin2hex(random_bytes(24));
+    setMeta('bot_api_token', $t);
+    return $t;
 }
 
 // ========== 支付通道配置（易支付/彩虹易支付，支持多通道） ==========

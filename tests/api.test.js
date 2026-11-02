@@ -2,6 +2,7 @@
 const fs = require('fs');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
+const http = require('http');
 const API_BASE = process.env.API_BASE || 'http://127.0.0.1:18098/api.php';
 const base = API_BASE + '?action=';
 const root = process.env.APP_ROOT || process.cwd();
@@ -35,6 +36,27 @@ async function uploadImage() {
   return { status: res.status, json: j };
 }
 function b32(s) { const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits=''; for (const ch of s.replace(/=+$/,'').toUpperCase()) { const i=a.indexOf(ch); if(i<0)continue; bits+=i.toString(2).padStart(5,'0'); } const out=[]; for(let i=0;i+8<=bits.length;i+=8) out.push(parseInt(bits.slice(i,i+8),2)); return Buffer.from(out); }
+const BOT_TOKEN = 'e56acaf2ce589c77d5ef96bb65b0783b';
+const origin = new URL(API_BASE).origin;
+const botBase = origin + '/?bot_api=1';
+let mockHits = [];
+const mockServer = http.createServer(function (req, res) {
+  let b = '';
+  req.on('data', c => b += c);
+  req.on('end', function () {
+    let j = null; try { j = JSON.parse(b); } catch (e) {}
+    mockHits.push({ url: req.url, body: b, json: j });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end('{"errcode":0}');
+  });
+});
+async function botReq(action, params) {
+  const q = new URLSearchParams(Object.assign({ action: action, token: BOT_TOKEN }, params || {}));
+  const res = await fetch(botBase + '&' + q.toString());
+  let j = null; try { j = await res.json(); } catch (e) {}
+  return { status: res.status, json: j };
+}
+function botItems(poll) { return (poll.json && poll.json.data && poll.json.data.items) || []; }
 function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/1000/30); const b=Buffer.alloc(8); b.writeUInt32BE(0,0); b.writeUInt32BE(step,4); const h=crypto.createHmac('sha1',key).update(b).digest(); const o=h[19]&15; const v=((h[o]&127)<<24)|((h[o+1]&255)<<16)|((h[o+2]&255)<<8)|(h[o+3]&255); return String(v%1000000).padStart(6,'0'); }
 
 (async () => {
@@ -44,9 +66,9 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   const cols = sql("SHOW COLUMNS FROM tx_images").toLowerCase();
   ok(cols.includes('sha256') && cols.includes('web') && cols.includes('byte_size'), 'tx_images 新列已迁移');
   const tables = sql("SHOW TABLES").toLowerCase();
-  ok(tables.includes('health_ack') && tables.includes('backup_runs'), 'health_ack / backup_runs 已建表');
+  ok(tables.includes('health_ack') && tables.includes('backup_runs') && tables.includes('bot_bindings') && tables.includes('bot_notifications'), 'health_ack / backup_runs / bot_* 已建表');
   const ver = sql("SELECT meta_value FROM system_meta WHERE meta_key='schema_version'").trim();
-  ok(ver === '1.20', 'SCHEMA_VERSION=1.20', ver);
+  ok(ver === '1.21', 'SCHEMA_VERSION=1.21', ver);
 
   console.log('[审计 Diff]');
   r = await req('transactions', 'GET', { per_page: 20 });
@@ -58,6 +80,69 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   const log = (r.json.logs || []).find(l => l.action === 'update_transaction' && l.target_id === expense.id);
   const det = log ? (typeof log.details === 'string' ? JSON.parse(log.details) : log.details) : null;
   ok(!!det && det.before && det.after && Array.isArray(det.changed), '日志包含 before/after/changed', det);
+
+
+  console.log('[机器人 API / 通知 / 群推送]');
+  await new Promise(function (resolve) { mockServer.listen(0, '127.0.0.1', resolve); });
+  const mockPort = mockServer.address().port;
+  r = await botReq('ping');
+  ok(r.status === 200 && r.json.ok && r.json.data.version === '1.18.0', 'bot ping', r);
+  r = await botReq('ping', { token: 'wrong-token' });
+  ok(r.status === 401, 'bot token 错误被拒绝', r.status);
+  r = await botReq('bind', { channel: 'wechat', user: 'remote-test-1', name: '张三' });
+  const bindSid = r.json && r.json.data && r.json.data.student_id;
+  ok(r.status === 200 && r.json.ok && bindSid > 0, '插件远端绑定', r);
+  r = await botReq('whoami', { channel: 'wechat', user: 'remote-test-1' });
+  ok(r.status === 200 && r.json.data.bound === true && r.json.data.name === '张三', '插件 whoami 持久化绑定', r);
+  r = await botReq('paylink', { channel: 'wechat', user: 'remote-test-1' });
+  ok(r.status === 200 && /\?pay=/.test(r.json.data.url) && r.json.data.url.indexOf('#page-pay') > 0, '插件缴费链接带 ?pay= 和 #page-pay', r.json && r.json.data);
+  r = await botReq('pay', { channel: 'wechat', user: 'remote-test-1' });
+  ok(r.status === 400 || r.status === 502, '未配置支付通道时插件缴费返回明确错误', r);
+  sql("REPLACE INTO system_meta (meta_key,meta_value) VALUES ('reminder_type','custom'),('reminder_webhook','http://127.0.0.1:" + mockPort + "/hook'),('bot_push_enabled','1')");
+  r = await req('transactions', 'POST', { type: 'expense', amount: 12.34, date: '2025-10-03', description: '机器人联调金额变动', category: '其他支出', sub_category: '其他支出' });
+  ok(r.status === 201, '创建金额变动测试账目', r);
+  await new Promise(function (resolve) { setTimeout(resolve, 1200); });
+  r = await botReq('poll', { after_id: 0, limit: 100 });
+  const amountNotices = botItems(r).filter(function (x) { return x.event === 'amount_change' && String(x.content).indexOf('机器人联调金额变动') >= 0; });
+  ok(amountNotices.length === 1, '金额变动写入 bot_notifications', amountNotices);
+  const amountNotice = amountNotices[0];
+  ok(amountNotice && amountNotice.push_status === 'sent', '金额变动已群推送', amountNotice && amountNotice.push_status);
+  ok(mockHits.some(function (h) { return h.body.indexOf('机器人联调金额变动') >= 0; }), 'mock 群机器人收到金额变动', mockHits.map(h => h.url));
+  if (amountNotice) {
+    r = await botReq('ack', { ids: String(amountNotice.id) });
+    ok(r.status === 200 && r.json.data.updated === 1, '插件 ack 金额通知', r);
+  }
+  r = await botReq('notify', { title: '联调通知', content: '机器人插件通知联调' });
+  const pluginNoticeId = r.json && r.json.data && r.json.data.id;
+  ok(r.status === 200 && pluginNoticeId > 0, '插件 notify 写通知', r);
+  r = await botReq('poll', { after_id: amountNotice ? amountNotice.id : 0, limit: 100 });
+  ok(botItems(r).some(function (x) { return x.id === pluginNoticeId && x.event === 'plugin_notify'; }), '插件轮询到自定义通知', botItems(r));
+
+  // 模拟一笔已支付订单，核销后应写 payment_success
+  const payOrderNo = 'CFBOT' + Date.now();
+  sql("INSERT INTO payment_orders (order_no,student_id,student_name,round_id,amount,channel,channel_id,status,settle_mode,created_by,trade_no,paid_at) VALUES ('" + payOrderNo + "'," + bindSid + ",'张三',0,10.00,'alipay','','paid','manual',0,'MOCKTRADE',NOW())");
+  const payOrderId = Number(sql("SELECT id FROM payment_orders WHERE order_no='" + payOrderNo + "'").trim());
+  r = await req('pay_confirm', 'POST', { id: payOrderId });
+  ok(r.status === 200 && r.json.ok, '核销已支付订单', r);
+  await new Promise(function (resolve) { setTimeout(resolve, 1000); });
+  r = await botReq('poll', { after_id: pluginNoticeId || 0, limit: 100 });
+  const payNotice = botItems(r).find(function (x) { return x.event === 'payment_success' && x.payload && x.payload.order_no === payOrderNo; });
+  ok(!!payNotice, '支付成功写入 bot_notifications', payNotice);
+  if (payNotice) {
+    r = await botReq('ack', { ids: String(payNotice.id) });
+    ok(r.status === 200 && r.json.data.updated === 1, '插件 ack 支付通知', r);
+  }
+  r = await botReq('poll', { after_id: 999999, limit: 10 });
+  ok(r.status === 200 && Array.isArray(r.json.data.items), '插件轮询游标接口', r.json && r.json.data);
+  r = await req('bot_notifications');
+  ok(r.status === 200 && Array.isArray(r.json.items) && r.json.summary && r.json.items.length > 0, '后台机器人通知队列', r.status);
+  r = await req('bot_token_rotate', 'POST', {});
+  const newBotToken = r.json && r.json.token;
+  ok(r.status === 200 && newBotToken && newBotToken.length >= 32, '后台轮换机器人 Token', r);
+  r = await botReq('ping', { token: newBotToken });
+  ok(r.status === 200 && r.json.ok, '新 Token 可用', r);
+  r = await botReq('ping');
+  ok(r.status === 401, '旧 Token 已失效', r.status);
 
   console.log('[凭证上传与自愈]');
   r = await uploadImage();
@@ -126,7 +211,7 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   r = await req('semesters', 'POST', { action: 'archive', id: activeId, create_next: 0 });
   ok(r.status === 200 && r.json.ok, '归档学期', r);
   r = await req('transactions', 'GET', { per_page: 20 });
-  const lockedTx = (r.json.transactions || [])[0];
+  const lockedTx = (r.json.transactions || []).find(t => t.locked === true);
   ok(lockedTx && lockedTx.locked === true, '列表返回 locked=true', lockedTx && lockedTx.locked);
   r = await req('transactions', 'PUT', { id: lockedTx.id, description: '不应成功' });
   ok(r.status === 403, '归档行编辑被拒绝', r.status);
@@ -159,6 +244,7 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   const cronJson = await cronRes.json().catch(() => ({}));
   ok(cronRes.status === 200 && cronJson.ok === true && cronJson.backup && cronJson.health, 'cron task=all', { status: cronRes.status, json: cronJson });
 
+  mockServer.close();
   console.log('\n结果：' + pass + ' 通过 / ' + fail + ' 失败');
   process.exit(fail === 0 ? 0 : 1);
 })().catch(e => { console.error('TEST ERROR', e); process.exit(1); });

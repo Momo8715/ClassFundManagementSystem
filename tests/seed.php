@@ -1,7 +1,7 @@
 <?php
 require __DIR__ . '/../config.php';
 $pdo = db();
-foreach (['tx_images','transactions','class_roster','semesters','operation_logs','login_history','payment_orders','fee_payments','import_batches','users','health_ack','backup_runs','security_events','blocked_ips'] as $t) {
+foreach (['tx_images','transactions','class_roster','semesters','operation_logs','login_history','payment_orders','fee_payments','import_batches','users','health_ack','backup_runs','bot_notifications','bot_bindings','security_events','blocked_ips'] as $t) {
     try { $pdo->exec("DELETE FROM `$t`"); } catch (\Throwable $e) {}
 }
 $h = password_hash('admin123', PASSWORD_BCRYPT);

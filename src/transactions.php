@@ -303,6 +303,11 @@ function handleTransactionsPost() {
     addLog($user['id'], $user['username'], 'create_transaction', 'transaction', $newId, [
         'type' => $type, 'amount' => $amount, 'date' => $date, 'description' => $desc
     ]);
+    if (function_exists('botNotifyAmountChange')) {
+        try { botNotifyAmountChange('create', [], [
+            'id' => $newId, 'type' => $type, 'amount' => $amount, 'date' => $date, 'description' => $desc,
+        ], (string)$user['username']); } catch (\Throwable $e) { error_log('[班费系统] 金额通知失败: ' . $e->getMessage()); }
+    }
 
     jsonOutput(['ok' => true, 'id' => $newId, 'dup_warning' => $dupWarning], 201);
 }
@@ -466,6 +471,10 @@ function handleTransactionsPut() {
         addLog($user['id'], $user['username'], 'update_transaction', 'transaction', $id, [
             'before' => $before, 'after' => $after, 'changed' => $changed,
         ]);
+        if (function_exists('botNotifyAmountChange')) {
+            try { botNotifyAmountChange('update', $before, $after + ['id' => $id], (string)$user['username']); }
+            catch (\Throwable $e) { error_log('[班费系统] 金额通知失败: ' . $e->getMessage()); }
+        }
 
         jsonOutput(['ok' => true]);
     } catch (\Exception $e) {
@@ -494,6 +503,10 @@ function handleTransactionsDelete() {
 
     $user = currentUser();
     addLog($user['id'], $user['username'], 'delete_transaction', 'transaction', $id, $old);
+    if (function_exists('botNotifyAmountChange')) {
+        try { botNotifyAmountChange('delete', $old, [], (string)$user['username']); }
+        catch (\Throwable $e) { error_log('[班费系统] 金额通知失败: ' . $e->getMessage()); }
+    }
 
     jsonOutput(['ok' => true]);
 }
@@ -511,9 +524,10 @@ function handleTransactionsBatchDelete() {
 
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     // v1.12：批量删除也要检查归档学期，避免绕过单条冻结
-    $check = db()->prepare("SELECT id, date FROM transactions WHERE id IN ($placeholders) AND deleted_at IS NULL");
+    $check = db()->prepare("SELECT id, date, type, amount, description FROM transactions WHERE id IN ($placeholders) AND deleted_at IS NULL");
     $check->execute($ids);
-    foreach ($check->fetchAll() as $row) {
+    $deletedRows = $check->fetchAll();
+    foreach ($deletedRows as $row) {
         $sem = semesterArchivedForDate((string)$row['date']);
         if ($sem) jsonOutput(['error' => '记录 #' . $row['id'] . ' 属于已归档学期「' . $sem['name'] . '」，请先取消归档'], 403);
     }
@@ -523,6 +537,16 @@ function handleTransactionsBatchDelete() {
 
     $user = currentUser();
     addLog($user['id'], $user['username'], 'batch_delete_transaction', 'transaction', null, ['ids' => $ids, 'count' => $deleted]);
+    if ($deleted > 0 && function_exists('botNotifyCreate')) {
+        $sum = 0.0;
+        foreach ($deletedRows as $row) $sum += (float)$row['amount'];
+        $idsHash = substr(sha1(implode(',', $ids)), 0, 16);
+        try { botNotifyCreate('amount_change', '账目批量删除',
+            '【账目变动】批量删除 ' . $deleted . ' 条，合计 ¥' . number_format($sum, 2, '.', '') . "\n操作人：" . $user['username'],
+            ['action' => 'batch_delete', 'ids' => $ids, 'count' => $deleted, 'amount' => round($sum, 2)],
+            'batch:' . $idsHash, 0, '', 'group'); }
+        catch (\Throwable $e) { error_log('[班费系统] 批量金额通知失败: ' . $e->getMessage()); }
+    }
 
     jsonOutput(['ok' => true, 'deleted' => $deleted]);
 }

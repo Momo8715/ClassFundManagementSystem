@@ -91,12 +91,16 @@
       var sSel = document.getElementById('payStudent');
       if (sSel) sSel.onchange = upd;
       upd();
-      // 专属缴费链接 ?pay=<学生ID>：自动选中该生并刷新金额提示
+      // 自动选学生：专属链接 ?pay=<id> / ?student=<id> 优先；学生登录后默认本人
+      var autoSid = parseInt(window.__payPreselect || 0, 10);
+      if (!autoSid && meta.can_view_all === false && meta.own_student_id) autoSid = parseInt(meta.own_student_id, 10);
+      if (sSel && autoSid && sSel.querySelector('option[value="' + autoSid + '"]')) {
+        sSel.value = String(autoSid);
+        upd();
+      }
       if (window.__payPreselect) {
-        var pv = String(window.__payPreselect);
-        if (sSel && sSel.querySelector('option[value="' + pv + '"]')) { sSel.value = pv; upd(); }
         window.__payPreselect = null;
-        try { history.replaceState(null, '', location.pathname); } catch (e) { /* 忽略 */ }
+        try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* 忽略 */ }
       }
 
       // 支付方式下拉：仅显示当前可用通道支持的支付方式（名称取自配置）
@@ -710,11 +714,12 @@
     } catch (e) { toast(e.message, 'error'); }
   };
 
-  // 专属缴费链接深链：?pay=<学生ID>
+  // 专属缴费链接深链：?pay=<id> / ?student=<id> / #page-pay
   function initPayDeepLink() {
-    var m = /[?&]pay=(\d+)/.exec(location.search || '');
-    if (!m) return;
-    window.__payPreselect = String(parseInt(m[1], 10));
+    var m = /[?&](?:pay|student)=(\d+)/.exec(location.search || '');
+    var hashPay = /#page-pay/.test(location.hash || '');
+    if (!m && !hashPay) return;
+    if (m) window.__payPreselect = String(parseInt(m[1], 10));
     function go() { if (window.switchPage) window.switchPage('pay'); }
     if (window._initialUser) { setTimeout(go, 250); return; }
     var app = document.getElementById('app');

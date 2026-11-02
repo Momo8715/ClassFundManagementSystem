@@ -555,6 +555,10 @@ function handlePayNotify() {
     db()->prepare("UPDATE payment_orders SET status='paid', trade_no=:t, paid_at=NOW(), notify_raw=:r WHERE id=:id")
         ->execute([':t' => mb_substr($tradeNo, 0, 64), ':r' => mb_substr((string)json_encode($params, JSON_UNESCAPED_UNICODE), 0, 60000), ':id' => (int)$order['id']]);
     $order['status'] = 'paid';
+    $order['paid_at'] = date('Y-m-d H:i:s');
+    if (function_exists('botNotifyPaymentSuccess')) {
+        try { botNotifyPaymentSuccess($order); } catch (\Throwable $e) { error_log('[班费系统] 支付通知写入失败: ' . $e->getMessage()); }
+    }
 
     if (($order['settle_mode'] ?? getPayConfig()['settle_mode']) === 'auto') paySettle($order, $tradeNo);
     echo 'success';
@@ -610,6 +614,9 @@ function handlePayConfirm() {
     if ($order['status'] !== 'paid') jsonOutput(['error' => '订单尚未支付成功，无法核销'], 400);
     if (!empty($order['settled'])) jsonOutput(['error' => '该订单已核销'], 400);
     $ok = paySettle($order, (string)$order['trade_no']);
+    if ($ok && function_exists('botNotifyPaymentSuccess')) {
+        try { botNotifyPaymentSuccess($order); } catch (\Throwable $e) { error_log('[班费系统] 支付通知写入失败: ' . $e->getMessage()); }
+    }
     $user = currentUser();
     addLog($user['id'], $user['username'], 'pay_confirm', 'payment', $id, ['order_no' => $order['order_no']]);
     $ok ? jsonOutput(['ok' => true]) : jsonOutput(['error' => '核销失败'], 500);

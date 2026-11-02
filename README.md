@@ -6,7 +6,7 @@
 
 > 上传即用 · 无需命令行 · 宝塔面板友好 · 支持远程一键升级
 
-[![版本](https://img.shields.io/badge/版本-v1.13.0-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
+[![版本](https://img.shields.io/badge/版本-v1.18.0-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
 [![PHP](https://img.shields.io/badge/PHP-8.0%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net)
 [![MySQL](https://img.shields.io/badge/MySQL-5.7%2B-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com)
 [![Status](https://img.shields.io/badge/状态-稳定-22c55e?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem)
@@ -56,6 +56,11 @@
 <td width="33%"><b>💾 数据备份</b><br><sub>数据库 + uploads 一键备份<br>下载 / 恢复 / 定时任务</sub></td>
 <td width="33%"><b>🖼️ 凭证自愈</b><br><sub>Web 回退版 · 校验哈希 · 去 EXIF<br>原图丢失仍能查看</sub></td>
 <td width="33%"><b>🧾 审计 Diff</b><br><sub>编辑前后字段对比<br>归档行只读锁定</sub></td>
+</tr>
+<tr>
+<td width="33%"><b>🤖 机器人插件</b><br><sub>远端绑定 · 缴费链接/下单<br>通知轮询 · 群推送</sub></td>
+<td width="33%"><b>📨 通知队列</b><br><sub>支付成功 / 金额变动<br>插件 poll/ack</sub></td>
+<td width="33%"><b>🔗 自动选学生</b><br><sub>?pay= / ?student=<br>登录学生默认本人</sub></td>
 </tr>
 </table>
 
@@ -148,6 +153,7 @@ ClassFundManagementSystem/
 │   ├── js/archive-lock.js  # 归档行锁定
 │   ├── js/log-diff.js      # 编辑前后 Diff
 │   ├── js/legacy-image.js  # 旧直连图片改走 API
+│   ├── js/bot-notify.js    # 机器人通知队列管理
 │   ├── js/common.js        # 新模块公共 API/转义/toast
 │   ├── img/                # 图标与图片
 │   └── vendor/             # 第三方前端库（Chart.js 等）
@@ -160,11 +166,13 @@ ClassFundManagementSystem/
 │   ├── pay_core.php        # 在线支付：配置 / 下单 / 回调 / 核销
 │   ├── pay_reminder.php    # 催缴通知 / 群机器人推送
 │   ├── qq_bot.php          # QQ 官方机器人指令 / 网关托管
+│   ├── bot_api.php         # 机器人插件 API（绑定/缴费/通知轮询）
+│   ├── bot_notify.php      # 通知队列 / 支付与金额变动 / 群推送
 │   ├── fee_ledger.php      # 统一费用账本（应缴/已缴/待缴唯一口径）
 │   ├── semesters.php       # 学期结转 / 归档快照 / 冻结
 │   ├── health.php          # 数据体检 / 对账中心
 │   ├── backup.php          # 数据库 + uploads 备份 / 恢复
-│   ├── cron.php            # 定时备份/清理/体检入口
+│   ├── cron.php            # 定时备份/清理/体检/机器人代推
 │   ├── import_batches.php  # 导入批次 / 去重 / 整批撤销
 │   ├── totp.php            # TOTP（RFC 6238）纯 PHP 实现
 │   ├── twofa.php           # 两步验证接口 / 登录挑战
@@ -436,6 +444,18 @@ Webhook 只能接收事件，无法让机器人在线。
 
 详见 `tools/qqgw/README.md`。
 
+### 🔌 微信/QQ 插件 API（v1.18）
+
+除 QQ 官方机器人外，也支持外部微信/QQ 插件通过 **`?bot_api=1`** 对接：
+
+- **远端绑定**：`action=bind&user=<远端ID>&name=张三`，绑定关系存 `bot_bindings`，不再依赖 JSON 文件。
+- **缴费**：`action=paylink` 返回 `?pay=<学生ID>#page-pay`；`action=pay` 可直接为已绑定学生创建支付订单。
+- **通知**：支付成功、账目金额变动、插件自定义通知写入 `bot_notifications`；插件用 `action=poll` 拉取、`action=ack` 确认。
+- **群推送**：配置群机器人后，站点会在请求结束时直接推送金额变动/到账通知（`push_status=sent`）；也可由插件轮询后自行推送，按 `push_status` 去重。
+- **Token**：在「配置管理 → 📣 群机器人 → 机器人插件接口」查看/轮换；支持 `token` 参数或 `X-Bot-Token` 头。
+
+完整端点、字段和验收清单见 [BOT_PLUGIN_API.md](BOT_PLUGIN_API.md)。
+
 ---
 
 ## 🔄 远程升级
@@ -463,7 +483,7 @@ GitHub Release → 下载 ZIP → 全站自动备份 → 解压覆盖 → 完成
 php tools/smoke.php                 # 纯函数冒烟
 node tools/check-js.js              # 全部 JS 语法
 npm ci && npm run build:app         # 修改 src-js/app.js 后重新构建 assets/js/app.js
-bash tests/run.sh                   # MySQL 集成测试（40+ 断言）
+bash tests/run.sh                   # MySQL 集成测试（62+ 断言，含机器人联调）
 ```
 
 - **不要直接编辑** `assets/js/app.js`：它是 `src-js/app.js` 经 esbuild 压缩的产物；改源码后执行 `npm run build:app`。
@@ -474,6 +494,7 @@ bash tests/run.sh                   # MySQL 集成测试（40+ 断言）
 
 | 版本 | 说明 |
 |:---:|------|
+| **v1.18.0** | 🤖 机器人插件 API：远端绑定 / 插件缴费 / 通知队列（poll+ack）/ 支付成功与金额变动通知 / 群推送 · 🔗 缴费页 ?pay/?student 自动选学生 · 🧪 62+ MySQL 集成测试通过 |
 | **v1.13.0** | ✨ 数据库 + uploads 一键备份/恢复/定时任务 · 🖼️ 凭证自愈（Web 回退/哈希/去 EXIF/缩略图回退）· 🩺 体检忽略/预演/修复前备份/定时告警 · 🛡️ 管理员 2FA 强制策略 · 🧾 审计 Diff + 归档行锁定 · 🧪 MySQL 集成测试进 CI · ⚙️ app.js 可读源码 + esbuild 构建 |
 | **v1.12.0** | ✨ 真学期结转（归档快照 / 期初承接 / 冻结 / 重新结账）· 🩺 数据体检/对账中心 · 🔐 TOTP 两步验证与强制改密 · 📥 导入批次/去重/撤销 · 🧰 统一费用账本、拆分支付模块、同步 schema、回收站资源清理、凭证与代缴权限收紧 |
 | **v1.11.4** | 🐛 班费收缴轮次支持「先建轮次、0 人 0 元」；进入收缴默认全部缴纳；校验提示改为明确原因（不再笼统报「无效金额」） |

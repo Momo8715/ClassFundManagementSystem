@@ -8,6 +8,19 @@
 
 ---
 
+## v1.18 升级注意（先读）
+
+1. **自动迁移**：新增 `bot_bindings`、`bot_notifications`；`SCHEMA_VERSION` 升至 1.21，升级后首次访问自动完成。
+2. **机器人绑定迁移**：旧的 `bot_bindings.json` 会在插件首次 `whoami/bind` 时自动导入 `bot_bindings` 表；原文件可保留，建议迁移验证后删除（已加入 .gitignore）。
+3. **Token**：默认沿用旧 token（`e56acaf…`），后台「配置管理 → 📣 群机器人 → 机器人插件接口」可查看/轮换；轮换后旧 token 立即失效。
+4. **插件接口**：`?bot_api=1` 新增 `bind/whoami/paylink/pay/poll/ack/notify`；完整字段与验收清单见 `BOT_PLUGIN_API.md`。
+5. **群推送**：支付成功/金额变动会写通知队列；若「群机器人」已配置 QQ/企业微信/飞书/钉钉/自定义 Webhook，站点会在请求结束时直接代推（`push_status=sent`），插件可跳过这些条目。
+6. **通知清理**：`cron.php?task=all` 现包含 `bot` 任务（代推 + 清理 30 天前已处理通知），建议保持每日执行。
+7. **缴费页**：`?pay=`、`?student=`、`#page-pay` 均可自动选学生；登录学生打开缴费页默认本人。
+8. **前端缓存**：Service Worker 升至 v43（新增 `bot-notify.js`），升级后 Ctrl+F5 或清一次 CF 缓存。
+
+---
+
 ## v1.13 升级注意（先读）
 
 1. **自动迁移**：新增 `tx_images.sha256 / byte_size / px_width / px_height / web / web_mime`、`health_ack`、`backup_runs`；`SCHEMA_VERSION` 升至 1.20。升级后首次访问自动完成。

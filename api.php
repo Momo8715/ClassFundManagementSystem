@@ -33,6 +33,7 @@ if (!in_array($_GET['action'] ?? '', ['pay_notify', 'pay_return', 'qq_webhook'],
 require_once __DIR__ . '/src/totp.php';
 require_once __DIR__ . '/src/twofa.php';
 require_once __DIR__ . '/src/fee_ledger.php';
+require_once __DIR__ . '/src/bot_notify.php';
 require_once __DIR__ . '/src/semesters.php';
 require_once __DIR__ . '/src/auth.php';
 require_once __DIR__ . '/src/transactions.php';
@@ -88,6 +89,10 @@ $actionMethods = [
     'backup_restore' => ['POST'],
     'backup_delete' => ['POST'],
     'backup_retention' => ['POST'],
+    'bot_notifications' => ['GET'],
+    'bot_notification_retry' => ['POST'],
+    'bot_token_rotate' => ['POST'],
+    'bot_push_toggle' => ['POST'],
     'pay_meta' => ['GET'],
     'pay_create' => ['POST'],
     'pay_config_get' => ['GET'],
@@ -276,6 +281,18 @@ switch ($action) {
         break;
     case 'backup_retention':
         handleBackupRetentionSave();
+        break;
+    case 'bot_notifications':
+        handleBotNotifications();
+        break;
+    case 'bot_notification_retry':
+        handleBotNotificationRetry();
+        break;
+    case 'bot_token_rotate':
+        handleBotTokenRotate();
+        break;
+    case 'bot_push_toggle':
+        handleBotPushToggle();
         break;
 
     // ========== 在线支付 ==========

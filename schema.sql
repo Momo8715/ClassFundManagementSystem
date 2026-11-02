@@ -188,6 +188,44 @@ CREATE TABLE IF NOT EXISTS `backup_runs` (
   KEY `idx_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='备份执行记录';
 
+
+-- 机器人远端绑定（v1.18）
+CREATE TABLE IF NOT EXISTS `bot_bindings` (
+  `id`          INT AUTO_INCREMENT PRIMARY KEY,
+  `channel`     VARCHAR(20) NOT NULL DEFAULT 'wechat' COMMENT '插件渠道',
+  `remote_user` VARCHAR(191) NOT NULL COMMENT '远端用户唯一标识',
+  `student_id`  INT NOT NULL DEFAULT 0,
+  `name`        VARCHAR(50) DEFAULT NULL,
+  `created_at`  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_channel_user` (`channel`, `remote_user`),
+  KEY `idx_student` (`student_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='机器人远端绑定';
+
+-- 机器人通知出站队列（v1.18）
+CREATE TABLE IF NOT EXISTS `bot_notifications` (
+  `id`           BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `event`        VARCHAR(50) NOT NULL,
+  `dedupe_key`   VARCHAR(191) DEFAULT NULL,
+  `student_id`   INT NOT NULL DEFAULT 0,
+  `student_name` VARCHAR(50) DEFAULT NULL,
+  `title`        VARCHAR(191) NOT NULL DEFAULT '',
+  `content`      TEXT NOT NULL,
+  `payload`      LONGTEXT DEFAULT NULL,
+  `scope`        VARCHAR(20) NOT NULL DEFAULT 'group',
+  `status`       VARCHAR(20) NOT NULL DEFAULT 'pending',
+  `push_status`  VARCHAR(20) NOT NULL DEFAULT 'pending',
+  `attempts`     INT NOT NULL DEFAULT 0,
+  `last_error`   VARCHAR(500) DEFAULT NULL,
+  `created_at`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `acked_at`     DATETIME DEFAULT NULL,
+  `pushed_at`    DATETIME DEFAULT NULL,
+  UNIQUE KEY `uk_dedupe` (`dedupe_key`),
+  KEY `idx_plugin_poll` (`status`, `id`),
+  KEY `idx_push` (`push_status`, `id`),
+  KEY `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='机器人通知队列';
+
 -- 登录 IP 黑名单（命中后 API 层直接拒绝）
 CREATE TABLE IF NOT EXISTS `blocked_ips` (
   `id`         INT AUTO_INCREMENT PRIMARY KEY,

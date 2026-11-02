@@ -48,3 +48,6 @@ _emoji_test.txt
 
 # Node 构建依赖
 node_modules/
+
+# 旧版机器人绑定缓存（v1.18 起改用 bot_bindings 表）
+bot_bindings.json

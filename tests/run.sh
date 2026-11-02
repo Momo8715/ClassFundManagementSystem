@@ -40,6 +40,8 @@ MYSQL=("$MYSQL_BIN" -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER")
 ALTER TABLE tx_images DROP COLUMN web_mime, DROP COLUMN web, DROP COLUMN px_height, DROP COLUMN px_width, DROP COLUMN byte_size, DROP COLUMN sha256;
 DROP TABLE IF EXISTS health_ack;
 DROP TABLE IF EXISTS backup_runs;
+DROP TABLE IF EXISTS bot_notifications;
+DROP TABLE IF EXISTS bot_bindings;
 DELETE FROM system_meta WHERE meta_key='schema_version';
 "
 

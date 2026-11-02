@@ -1,1 +1,1 @@
-{"version": "1.17.0", "notes": "自动发布 v1.17.0", "url": "https://github.com/Momo8715/ClassFundManagementSystem/releases/download/v1.17.0/update.zip", "sha256": "92a9c9d21cd144385289a316b76da4195b021d0b4bc5718f8b2af26b19a43cd6"}
+{"version":"1.18.0","notes":"机器人插件 API：远端绑定/缴费/通知轮询/支付与金额变动群推送；缴费页自动选学生","url":"https://github.com/Momo8715/ClassFundManagementSystem/releases/download/v1.18.0/update.zip"}
