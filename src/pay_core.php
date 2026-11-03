@@ -421,19 +421,53 @@ function handlePayMeta() {
     ]);
 }
 
+// ==================== 接口：公开缴费元数据（免登录） ====================
+/**
+ * 免登录缴费页使用：只返回学生姓名和轮次，不返回任何学生的应缴/已缴/待缴。
+ * 这样公开页面只能选择缴费对象，无法通过元数据枚举全班欠费金额。
+ */
+function handlePayPublicMeta() {
+    requireRateLimit('pay_public_meta', 30, 60);
+    $cfg = getPayConfig();
+    $roster = db()->query("SELECT id, name FROM class_roster ORDER BY sort_key, id")->fetchAll();
+    $rounds = db()->query("SELECT id, date, description, amount, expected_amount, per_person FROM transactions
+        WHERE type='income' AND sub_category='班费收缴' AND deleted_at IS NULL
+        ORDER BY date DESC, id DESC LIMIT 100")->fetchAll();
+    $eligibleNow = (int)db()->query("SELECT COUNT(*) FROM class_roster WHERE exempt=0")->fetchColumn();
+    foreach ($rounds as &$rd) { $rd['per_person'] = payRoundPerPerson($rd, $eligibleNow); }
+    unset($rd);
+    $usable = array_values(array_filter(payChannels(), function ($c) { return $c['enabled'] && $c['gateway'] !== '' && $c['pid'] !== '' && $c['key'] !== ''; }));
+    jsonOutput([
+        'roster' => $roster,
+        'rounds' => $rounds,
+        'config' => [
+            'enabled' => payConfigured(),
+            'default_type' => $cfg['default_type'],
+            'available_types' => payAvailableTypes(),
+            'methods' => payMethods(),
+            'channels' => array_map(function ($c) { return ['id' => $c['id'], 'name' => $c['name'], 'types' => $c['types']]; }, $usable),
+        ],
+    ]);
+}
+
 // ==================== 接口：创建订单 ====================
-function handlePayCreate() {
-    requireLogin();
-    requireCsrfToken();
-    requireRateLimit('pay_create', 20, 60);
+function handlePayCreate(bool $public = false) {
+    if ($public) {
+        requireRateLimit('pay_public_create', 10, 60);
+    } else {
+        requireLogin();
+        requireCsrfToken();
+        requireRateLimit('pay_create', 20, 60);
+    }
     if (!payConfigured()) jsonOutput(['error' => '支付通道未配置或未开启，请联系管理员'], 400);
 
     $cfg = getPayConfig();
     $input = jsonInput();
     $studentId = (int)($input['student_id'] ?? 0);
     $roundId   = (int)($input['round_id'] ?? 0);
-    // 非班委只能为本人下单，避免代缴/冒名
-    if (!hasPermission('viewPayments')) {
+    if ($public && $studentId <= 0) jsonOutput(['error' => '请选择缴费学生'], 400);
+    // 非班委只能为本人下单，避免代缴/冒名；公开缴费页由访问者自行选择学生
+    if (!$public && !hasPermission('viewPayments')) {
         $ownId = currentStudentId();
         if ($ownId <= 0) jsonOutput(['error' => '当前账号未绑定花名册学生，请联系管理员将用户名与花名册姓名对应'], 403);
         if ($studentId > 0 && $studentId !== $ownId) jsonOutput(['error' => '只能为本人缴费'], 403);
@@ -469,15 +503,32 @@ function handlePayCreate() {
     if ($amount <= 0) jsonOutput(['error' => $roundId > 0 ? '该轮次未设置每人应缴金额' : '该学生当前已缴清，无需缴费'], 400);
     if ($amount < (float)$cfg['min_amount'] || $amount > (float)$cfg['max_amount']) jsonOutput(['error' => '金额超出允许范围'], 400);
 
+    // 公开下单：10 分钟内同一学生/轮次/通道复用未支付订单，避免重复点击造成重复订单
+    if ($public) {
+        $st = db()->prepare("SELECT * FROM payment_orders
+            WHERE student_id=:sid AND round_id=:rid AND channel=:ch AND status='pending'
+              AND created_at >= DATE_SUB(NOW(), INTERVAL 10 MINUTE)
+            ORDER BY id DESC LIMIT 1");
+        $st->execute([':sid' => $studentId, ':rid' => $roundId, ':ch' => $type]);
+        $existing = $st->fetch();
+        if ($existing && !empty($existing['pay_url'])) {
+            jsonOutput([
+                'ok' => true, 'order_no' => $existing['order_no'], 'amount' => (float)$existing['amount'],
+                'channel' => $existing['channel'], 'channel_id' => $existing['channel_id'],
+                'payurl' => $existing['pay_url'], 'qrcode' => '', 'reused' => true,
+            ]);
+        }
+    }
+
     $orderNo = 'CF' . date('YmdHis') . strtoupper(bin2hex(random_bytes(4)));
-    $user = currentUser();
+    $createdBy = $public ? 0 : (int)currentUser()['id'];
     db()->prepare("INSERT INTO payment_orders
         (order_no, student_id, student_name, round_id, amount, channel, channel_id, status, settle_mode, created_by)
         VALUES (:o, :sid, :sn, :rid, :a, :ch, :cid, 'pending', :sm, :cb)")
         ->execute([
             ':o' => $orderNo, ':sid' => $studentId, ':sn' => $studentName ?: null,
             ':rid' => $roundId, ':a' => $amount, ':ch' => $type, ':cid' => $channel['id'],
-            ':sm' => $cfg['settle_mode'], ':cb' => (int)$user['id'],
+            ':sm' => $cfg['settle_mode'], ':cb' => $createdBy,
         ]);
 
     $name = '班费缴费' . ($studentName !== '' ? '-' . $studentName : '');

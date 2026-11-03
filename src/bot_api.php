@@ -283,7 +283,7 @@ function handleBotApi(): void {
                 if ($st === null) botApiErr('未找到缴费数据', 404);
                 botApiOut(['name' => (string)$b['name'], 'student_id' => $sid,
                     'outstanding' => (float)$st['outstanding'],
-                    'url' => payBaseUrl() . '/?pay=' . $sid . '#page-pay']);
+                    'url' => payBaseUrl() . '/pay.php?pay=' . $sid]);
 
             case 'pay':
             case 'pay_create':

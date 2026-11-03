@@ -86,7 +86,7 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   await new Promise(function (resolve) { mockServer.listen(0, '127.0.0.1', resolve); });
   const mockPort = mockServer.address().port;
   r = await botReq('ping');
-  ok(r.status === 200 && r.json.ok && r.json.data.version === '1.18.0', 'bot ping', r);
+  ok(r.status === 200 && r.json.ok && r.json.data.version === '1.18.1', 'bot ping', r);
   r = await botReq('ping', { token: 'wrong-token' });
   ok(r.status === 401, 'bot token 错误被拒绝', r.status);
   r = await botReq('bind', { channel: 'wechat', user: 'remote-test-1', name: '张三' });
@@ -95,7 +95,7 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   r = await botReq('whoami', { channel: 'wechat', user: 'remote-test-1' });
   ok(r.status === 200 && r.json.data.bound === true && r.json.data.name === '张三', '插件 whoami 持久化绑定', r);
   r = await botReq('paylink', { channel: 'wechat', user: 'remote-test-1' });
-  ok(r.status === 200 && /\?pay=/.test(r.json.data.url) && r.json.data.url.indexOf('#page-pay') > 0, '插件缴费链接带 ?pay= 和 #page-pay', r.json && r.json.data);
+  ok(r.status === 200 && /\/pay\.php\?pay=/.test(r.json.data.url), '插件缴费链接指向免登录缴费页', r.json && r.json.data);
   r = await botReq('pay', { channel: 'wechat', user: 'remote-test-1' });
   ok(r.status === 400 || r.status === 502, '未配置支付通道时插件缴费返回明确错误', r);
   sql("REPLACE INTO system_meta (meta_key,meta_value) VALUES ('reminder_type','custom'),('reminder_webhook','http://127.0.0.1:" + mockPort + "/hook'),('bot_push_enabled','1')");

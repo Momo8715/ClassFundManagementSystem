@@ -95,6 +95,8 @@ $actionMethods = [
     'bot_push_toggle' => ['POST'],
     'pay_meta' => ['GET'],
     'pay_create' => ['POST'],
+    'pay_public_meta' => ['GET'],
+    'pay_public_create' => ['POST'],
     'pay_config_get' => ['GET'],
     'pay_config_save' => ['POST'],
     'pay_reminders' => ['GET'],
@@ -301,6 +303,12 @@ switch ($action) {
         break;
     case 'pay_create':
         handlePayCreate();
+        break;
+    case 'pay_public_meta':
+        handlePayPublicMeta();
+        break;
+    case 'pay_public_create':
+        handlePayCreate(true);
         break;
     case 'pay_notify':
         handlePayNotify();

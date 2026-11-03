@@ -185,6 +185,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
             <p class="hint" id="loginError" style="color:var(--danger);display:none"></p>
             <p class="hint" id="loginDebug" style="color:#f59e0b;display:none;margin-top:4px;font-size:11px"></p>
             <p class="hint">💡 账号由管理员添加，不支持自行注册</p>
+            <p class="hint" style="margin-top:10px"><a href="pay.php" style="color:#93c5fd;text-decoration:none">💳 在线缴费（免登录）</a></p>
         </div>
     </div>
 
