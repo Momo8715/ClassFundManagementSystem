@@ -281,10 +281,11 @@ function handleBotApi(): void {
                 $sid = (int)$b['student_id'];
                 $st = feeAllStatuses()[$sid] ?? null;
                 if ($st === null) botApiErr('未找到缴费数据', 404);
-                botApiOut(['name' => (string)$b['name'], 'student_id' => $sid,
+                $payData = ['name' => (string)$b['name'], 'student_id' => $sid,
                     'outstanding' => (float)$st['outstanding'],
-                    'url' => payBaseUrl() . '/pay.php?pay=' . $sid,
-                    'backup_url' => payBackupBaseUrl() . '/pay.php?pay=' . $sid]);
+                    'url' => payBaseUrl() . '/pay.php?pay=' . $sid];
+                if (payBackupBaseUrl() !== payBaseUrl()) $payData['backup_url'] = payBackupBaseUrl() . '/pay.php?pay=' . $sid;
+                botApiOut($payData);
 
             case 'pay':
             case 'pay_create':
