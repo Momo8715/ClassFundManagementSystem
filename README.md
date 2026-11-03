@@ -6,7 +6,7 @@
 
 > 上传即用 · 无需命令行 · 宝塔面板友好 · 支持远程一键升级
 
-[![版本](https://img.shields.io/badge/版本-v1.18.0-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
+[![版本](https://img.shields.io/badge/版本-v1.18.1-6366f1?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem/releases)
 [![PHP](https://img.shields.io/badge/PHP-8.0%2B-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net)
 [![MySQL](https://img.shields.io/badge/MySQL-5.7%2B-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com)
 [![Status](https://img.shields.io/badge/状态-稳定-22c55e?style=for-the-badge)](https://github.com/Momo8715/ClassFundManagementSystem)
@@ -360,6 +360,7 @@ cp pay_config.example.php pay_config.php
 - **逐人催缴**：每个学生可复制专属文案，或复制**专属缴费链接** `?pay=<学生ID>`；学生打开后自动进入「在线缴费」并预选本人姓名。
 - **复制全班文案**：一条汇总消息（未缴人数 / 合计待缴 / 名单 / 缴费入口），可直接发到班级群。
 - **推送群机器人**（管理员在 **⚙️ 配置管理 → 📣 群机器人** 配置）：支持企业微信 / 飞书 / 钉钉 / **QQ 官方机器人** / 自定义 Webhook，一键把汇总推送到群。
+- **每日自动催缴**：配置页勾选「每日自动催缴」，由 `cron.php?task=all`（或 `task=remind`）每天首次执行时推送一次；当天已发过不会重复。
 
 | 机器人类型 | 需要的配置 | 发送方式 |
 |---|---|---|
@@ -399,6 +400,7 @@ https://你的域名/api.php?action=qq_webhook
 | `查班费` / `我的班费` / `班费` | 回复该生累计应缴 / 已缴 / 待缴 + 专属缴费链接（永久免缴会提示） |
 | `我的明细` / `缴费明细` / `明细` | 逐轮列出我的缴纳情况（已缴 / 待缴 / 免缴）与合计 |
 | `我的链接` / `缴费链接` | 只回复我的专属在线缴费链接 |
+| `缴费` / `交费` / `我要缴费` | 绑定学生后直接回复本人专属缴费链接（v1.18.1） |
 | `本轮班费` / `最新一轮` | 最新一轮的日期、说明、每人应缴与全班应收 |
 | `班级概况` / `结余` / `余额` | 总收入 / 总支出 / 结余 / 未缴人数与合计 |
 | `收缴进度` / `进度` / `收缴率` | 应缴人数、已缴清、未缴清与收缴率 |
@@ -410,7 +412,7 @@ https://你的域名/api.php?action=qq_webhook
 | `私信催缴` | 给有单聊记录（已知 user_openid）的未缴同学发催缴私信（管理员） |
 | `发通知 内容` | 推送到已配置的推送目标（管理员） |
 
-> 未识别的指令会自动回复功能菜单。`查班费`、`我的明细`、`我的链接` 需先 `绑定 姓名`。
+> 未识别的指令会自动回复功能菜单。`查班费`、`我的明细`、`我的链接`、`缴费` 需先 `绑定 姓名`。
 
 > **管理员绑定**与学生绑定互不影响（管理员用独立绑定键），可同时既是管理员又是学生。
 
@@ -483,7 +485,7 @@ GitHub Release → 下载 ZIP → 全站自动备份 → 解压覆盖 → 完成
 php tools/smoke.php                 # 纯函数冒烟
 node tools/check-js.js              # 全部 JS 语法
 npm ci && npm run build:app         # 修改 src-js/app.js 后重新构建 assets/js/app.js
-bash tests/run.sh                   # MySQL 集成测试（62+ 断言，含机器人联调）
+bash tests/run.sh                   # MySQL 集成测试（68+ 断言，含机器人联调）
 ```
 
 - **不要直接编辑** `assets/js/app.js`：它是 `src-js/app.js` 经 esbuild 压缩的产物；改源码后执行 `npm run build:app`。
@@ -494,6 +496,7 @@ bash tests/run.sh                   # MySQL 集成测试（62+ 断言，含机�
 
 | 版本 | 说明 |
 |:---:|------|
+| **v1.18.1** | 🤖 绑定后发送「缴费/交费」自动回本人缴费链接 · 🔔 每日自动催缴提醒（cron，一次/天）· 🧭 指令开关自动保存并提示 |
 | **v1.18.0** | 🤖 机器人插件 API：远端绑定 / 插件缴费 / 通知队列（poll+ack）/ 支付成功与金额变动通知 / 群推送 · 🔗 缴费页 ?pay/?student 自动选学生 · 🧪 62+ MySQL 集成测试通过 |
 | **v1.13.0** | ✨ 数据库 + uploads 一键备份/恢复/定时任务 · 🖼️ 凭证自愈（Web 回退/哈希/去 EXIF/缩略图回退）· 🩺 体检忽略/预演/修复前备份/定时告警 · 🛡️ 管理员 2FA 强制策略 · 🧾 审计 Diff + 归档行锁定 · 🧪 MySQL 集成测试进 CI · ⚙️ app.js 可读源码 + esbuild 构建 |
 | **v1.12.0** | ✨ 真学期结转（归档快照 / 期初承接 / 冻结 / 重新结账）· 🩺 数据体检/对账中心 · 🔐 TOTP 两步验证与强制改密 · 📥 导入批次/去重/撤销 · 🧰 统一费用账本、拆分支付模块、同步 schema、回收站资源清理、凭证与代缴权限收紧 |

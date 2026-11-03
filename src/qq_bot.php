@@ -199,12 +199,13 @@ function qqCommands(): array {
         ['key' => 'query',    'cmd' => '查班费 / 我的班费', 'desc' => '应缴 / 已缴 / 待缴 + 缴费链接', 'always' => false],
         ['key' => 'detail',   'cmd' => '我的明细',          'desc' => '逐轮缴费情况',                'always' => false],
         ['key' => 'link',     'cmd' => '我的链接',          'desc' => '专属在线缴费链接',            'always' => false],
+        ['key' => 'pay',      'cmd' => '缴费 / 交费',       'desc' => '发送本人专属缴费链接',        'always' => false],
         ['key' => 'round',    'cmd' => '本轮班费',          'desc' => '最新一轮班费信息',            'always' => false],
         ['key' => 'overview', 'cmd' => '班级概况 / 结余',   'desc' => '总收入 / 总支出 / 结余',      'always' => false],
         ['key' => 'progress', 'cmd' => '收缴进度',          'desc' => '已缴 / 未缴人数与收缴率',     'always' => false],
         ['key' => 'recent',   'cmd' => '最近收支',          'desc' => '最近 10 笔收支记录',          'always' => false],
         ['key' => 'unpaid',   'cmd' => '未缴名单',          'desc' => '未缴清学生与金额（管理员）',  'always' => false],
-        ['key' => 'urge',     'cmd' => '催缴',              'desc' => '生成催缴名单，群内 @ 未缴同学（管理员）', 'always' => false],
+        ['key' => 'urge',     'cmd' => '催缴 / 催缴提醒',   'desc' => '生成催缴名单，群内 @ 未缴同学（管理员）', 'always' => false],
         ['key' => 'urge_dm',  'cmd' => '私信催缴',          'desc' => '给有单聊记录的同学发催缴私信（管理员）', 'always' => false],
         ['key' => 'notify',   'cmd' => '发通知 内容',       'desc' => '推送到已配置的推送目标（管理员）', 'always' => false],
     ];
@@ -347,6 +348,7 @@ function qqMenu(): string {
             ['key' => 'query',    'text' => '查班费 —— 我的应缴 / 已缴 / 待缴'],
             ['key' => 'detail',   'text' => '我的明细 —— 我每轮班费的缴纳情况'],
             ['key' => 'link',     'text' => '我的链接 —— 我的专属在线缴费链接'],
+            ['key' => 'pay',      'text' => '缴费 / 交费 —— 直接发送本人缴费链接'],
             ['key' => 'round',    'text' => '本轮班费 —— 最新一轮班费信息'],
             ['key' => 'overview', 'text' => '班级概况 —— 总收入 / 总支出 / 结余'],
             ['key' => 'progress', 'text' => '收缴进度 —— 已缴 / 未缴人数与收缴率'],
@@ -455,7 +457,7 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
         return;
     }
 
-    if (qqCmdOn($c, 'urge') && preg_match('/^(?:催缴|催交|催收|提醒缴费)(?:[\s:：]+(.+))?$/u', $cmd, $m)) {
+    if (qqCmdOn($c, 'urge') && preg_match('/^(?:催缴|催交|催收|提醒缴费|催缴提醒|缴费提醒)(?:[\s:：]+(.+))?$/u', $cmd, $m)) {
         if (!$isAdmin) { qqReply($c, $scope, $target, $msgId, '该指令仅管理员可用。发送「管理员指令」查看方式。'); return; }
         list($text) = qqBuildUrge($c, $scope, $target, trim((string)($m[1] ?? '')));
         qqReply($c, $scope, $target, $msgId, $text);
@@ -562,6 +564,18 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
         $lines[] = '应缴 ¥' . number_format($due, 2, '.', '') . ' / 已缴 ¥' . number_format($paid, 2, '.', '')
             . ' / 待缴 ¥' . number_format(max(0, $due - $paid), 2, '.', '');
         qqReply($c, $scope, $target, $msgId, implode("\n", $lines));
+        return;
+    }
+
+    // 缴费 / 交费：绑定后直接发本人专属缴费链接（不要求先发“我的链接”）
+    if (qqCmdOn($c, 'pay') && preg_match('/^(?:缴费|交费|我要缴费|去缴费|付款)$/u', $cmd)) {
+        $bind = qqBindingStudent($key);
+        if (!$bind) { qqReply($c, $scope, $target, $msgId, $noBind); return; }
+        $sid = (int)$bind['student_id'];
+        $link = payBaseUrl() . '/?pay=' . $sid . '#page-pay';
+        qqReply($c, $scope, $target, $msgId,
+            "【" . $bind['name'] . " 专属缴费链接】\n" . $link
+            . "\n\n点开后会自动选中你本人，直接在线缴纳。");
         return;
     }
 

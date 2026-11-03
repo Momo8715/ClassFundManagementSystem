@@ -44,6 +44,7 @@ function reminderConfig(): array {
         'qq_menu_footer'    => getMeta('qq_menu_footer', ''),
         'qq_custom_replies' => (array)(json_decode(getMeta('qq_custom_replies', '[]'), true) ?: []),
         'qq_c2c_open'       => getMeta('qq_c2c_open', '1') !== '0',
+        'auto_remind'       => getMeta('reminder_auto_enabled', '0') === '1',
     ];
 }
 
@@ -177,6 +178,38 @@ function reminderQqSend(array $c, string $text): array {
     return ['ok' => true, 'http' => $lastHttp, 'sent' => $sent, 'resp' => ''];
 }
 
+/**
+ * 每日自动催缴提醒（由 cron.php?task=remind 或 task=all 触发）
+ * 同一天只发一次；全部缴清时只记日期，不发消息。
+ */
+function reminderAutoSend(): array {
+    if (getMeta('reminder_auto_enabled', '0') !== '1') return ['ok' => true, 'skipped' => 'disabled'];
+    $today = date('Y-m-d');
+    if (getMeta('reminder_auto_last', '') === $today) return ['ok' => true, 'skipped' => 'already_sent_today'];
+    $c = reminderConfig();
+    if ($c['type'] === 'qq') {
+        if ($c['qq_appid'] === '' || $c['qq_secret'] === '' || empty($c['qq_targets'])) {
+            return ['ok' => false, 'skipped' => 'qq_not_configured'];
+        }
+    } elseif ($c['webhook'] === '') {
+        return ['ok' => false, 'skipped' => 'webhook_not_configured'];
+    }
+    $sum = reminderSummary();
+    if ((int)$sum['count'] === 0) {
+        setMeta('reminder_auto_last', $today);
+        return ['ok' => true, 'count' => 0, 'message' => '全部已缴清，无需催缴'];
+    }
+    $res = ($c['type'] === 'qq')
+        ? reminderQqSend($c, $sum['text'])
+        : reminderWebhookPost($c['webhook'], reminderWebhookPayload($c['type'], $sum['text']));
+    if (!empty($res['ok'])) {
+        setMeta('reminder_auto_last', $today);
+        addLog(0, 'system', 'reminder_auto_send', 'payment', null, ['count' => $sum['count'], 'total' => $sum['total'], 'type' => $c['type']]);
+        return ['ok' => true, 'count' => $sum['count'], 'total' => $sum['total'], 'sent' => $res['sent'] ?? 1];
+    }
+    return ['ok' => false, 'count' => $sum['count'], 'total' => $sum['total'], 'error' => mb_substr((string)($res['resp'] ?? $res['error'] ?? '发送失败'), 0, 300)];
+}
+
 function handlePayReminders() {
     requirePermission('viewPayments');
     jsonOutput(reminderSummary());
@@ -205,6 +238,7 @@ function handlePayReminderCfgGet() {
         'qq_targets' => $c['qq_targets'],
         'qq_sandbox' => $c['qq_sandbox'],
         'qq_c2c_open' => $c['qq_c2c_open'],
+        'auto_remind' => $c['auto_remind'],
         'webhook_log' => (json_decode(getMeta('qq_webhook_log', '[]'), true) ?: []),
         'gateway' => qqGatewayStatus(),
         'qq_cmd_disabled' => $c['qq_cmd_disabled'],
@@ -248,6 +282,7 @@ function handlePayReminderCfgSave() {
     if (array_key_exists('qq_c2c_open', $input)) {
         $c2cOpen = !empty($input['qq_c2c_open']) && $input['qq_c2c_open'] !== '0' && $input['qq_c2c_open'] !== 'false';
     }
+    $autoRemind = !empty($input['auto_remind']) && $input['auto_remind'] !== '0' && $input['auto_remind'] !== 'false';
 
     // 多目标：QQ群 / QQ用户（单聊）/ 频道，最多 20 个
     $targetsIn = $input['qq_targets'] ?? [];
@@ -323,6 +358,7 @@ function handlePayReminderCfgSave() {
     setMeta('qq_custom_replies', json_encode($customReplies, JSON_UNESCAPED_UNICODE));
     setMeta('qq_c2c_open', $c2cOpen ? '1' : '0');
     setMeta('reminder_qq_sandbox', $sandbox ? '1' : '0');
+    setMeta('reminder_auto_enabled', $autoRemind ? '1' : '0');
     setMeta('reminder_qq_token', '');
     setMeta('reminder_qq_token_exp', '0');
 

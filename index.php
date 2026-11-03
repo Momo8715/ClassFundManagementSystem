@@ -733,6 +733,8 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                                 <input type="password" id="remCfgWebhook" autocomplete="new-password" placeholder="https://..." style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg-card);color:var(--text);width:100%">
                                 <label style="font-size:13px">启用</label>
                                 <label style="font-size:13px"><input type="checkbox" id="remCfgEnabled"> 启用推送</label>
+                                <label style="font-size:13px">自动提醒</label>
+                                <label style="font-size:13px"><input type="checkbox" id="remCfgAutoRemind"> 每日自动催缴（由 cron 首次执行，当天只发一次）</label>
                             </div>
 
                             <!-- QQ 机器人专属设置（选「QQ 官方机器人」时显示） -->
@@ -782,7 +784,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
 
                                 <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px">
                                     <b style="font-size:13px;color:var(--primary)">🧭 指令面板与自定义菜单</b>
-                                    <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">勾选启用的指令；停用的指令机器人不响应，也不会出现在菜单里。</div>
+                                    <div style="font-size:12px;color:var(--text-secondary);margin:4px 0 8px">勾选启用的指令；停用的指令机器人不响应，也不会出现在菜单里。<span style="color:var(--primary)">修改开关后会自动保存。</span></div>
                                     <div id="remCfgQqCmdList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px 16px"></div>
                                     <div style="display:grid;grid-template-columns:90px 1fr;gap:8px 10px;align-items:center;max-width:680px;margin-top:14px">
                                         <label style="font-size:12px">菜单标题</label>
@@ -1029,7 +1031,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
     <script src="assets/js/security.js?v=5" defer data-cfasync="false"></script>
     <!-- 在线支付面板（v1.8.1） -->
-    <script src="assets/js/pay.js?v=24" defer data-cfasync="false"></script>
+    <script src="assets/js/pay.js?v=25" defer data-cfasync="false"></script>
     <!-- 通用二级分类页签（多分栏页面） -->
     <script src="assets/js/tabs.js?v=2" defer data-cfasync="false"></script>
     <!-- 收支弹窗「班费收缴」简化模式 -->

@@ -584,6 +584,14 @@
     } catch (e) { toast(e.message, 'error'); }
   };
 
+  var cfgAutoTimer = null;
+  function scheduleCfgAutoSave() {
+    if (cfgAutoTimer) clearTimeout(cfgAutoTimer);
+    cfgAutoTimer = setTimeout(function () {
+      if (window._payReminderCfgSave) window._payReminderCfgSave(true);
+    }, 450);
+  }
+
   // 渲染指令面板（复选框）
   function renderQqCommands(cmds) {
     var list = document.getElementById('remCfgQqCmdList');
@@ -594,6 +602,8 @@
       lab.style.cssText = 'font-size:12px;display:flex;align-items:center;gap:4px;white-space:nowrap';
       lab.innerHTML = '<input type="checkbox" class="qq-cmd" value="' + esc(cmd.key) + '"' + (cmd.enabled ? ' checked' : '') + (cmd.always ? ' disabled' : '') + '> '
         + esc(cmd.cmd) + '<span style="color:var(--text-secondary)">（' + esc(cmd.desc) + '）</span>';
+      var cb = lab.querySelector('input');
+      if (cb && !cmd.always) cb.addEventListener('change', scheduleCfgAutoSave);
       list.appendChild(lab);
     });
   }
@@ -647,7 +657,8 @@
       var d = await api('pay_reminder_cfg_get');
       var c = d.config || {};
       var t = document.getElementById('remCfgType'); if (t) t.value = c.type || 'wecom';
-      var en = document.getElementById('remCfgEnabled'); if (en) en.checked = !!c.enabled;
+      var en = document.getElementById('remCfgEnabled'); if (en) { en.checked = !!c.enabled; en.onchange = scheduleCfgAutoSave; }
+      var ar = document.getElementById('remCfgAutoRemind'); if (ar) { ar.checked = !!c.auto_remind; ar.onchange = scheduleCfgAutoSave; }
       var w = document.getElementById('remCfgWebhook');
       if (w) {
         w.value = '';
@@ -677,7 +688,7 @@
       window._payReminderCfgToggle();
     } catch (e) { /* 忽略 */ }
   };
-  window._payReminderCfgSave = async function () {
+  window._payReminderCfgSave = async function (silent) {
     try {
       var disabled = [], cmdBoxes = qaAll('#remCfgQqCmdList .qq-cmd');
       for (var ci = 0; ci < cmdBoxes.length; ci++) { if (!cmdBoxes[ci].checked && !cmdBoxes[ci].disabled) disabled.push(cmdBoxes[ci].value); }
@@ -707,10 +718,15 @@
         qq_menu_footer: val('remCfgMenuFooter'),
         qq_custom_replies: JSON.stringify(replies),
         qq_sandbox: (document.getElementById('remCfgQqSandbox') || {}).checked ? '1' : '0',
-        qq_c2c_open: (document.getElementById('remCfgQqC2cOpen') || {}).checked ? '1' : '0'
+        qq_c2c_open: (document.getElementById('remCfgQqC2cOpen') || {}).checked ? '1' : '0',
+        auto_remind: (document.getElementById('remCfgAutoRemind') || {}).checked ? '1' : '0'
       }, 'POST');
-      toast('催缴推送设置已保存');
-      window._payReminderCfgLoad();
+      if (!silent) {
+        toast('催缴推送设置已保存');
+        window._payReminderCfgLoad();
+      } else {
+        toast('已自动保存');
+      }
     } catch (e) { toast(e.message, 'error'); }
   };
 

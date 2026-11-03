@@ -35,7 +35,7 @@ $token = (string)($_GET['token'] ?? '');
 if (!backupTokenValid($token)) cronJson(['error' => 'token invalid'], 403);
 
 $task = strtolower(trim((string)($_GET['task'] ?? 'all')));
-if (!in_array($task, ['backup', 'cleanup', 'health', 'bot', 'all'], true)) cronJson(['error' => '未知任务'], 400);
+if (!in_array($task, ['backup', 'cleanup', 'health', 'bot', 'remind', 'all'], true)) cronJson(['error' => '未知任务'], 400);
 
 set_time_limit(600);
 $out = ['ok' => true, 'task' => $task, 'ran_at' => date('Y-m-d H:i:s')];
@@ -50,6 +50,9 @@ try {
     if ($task === 'bot' || $task === 'all') {
         $out['bot_push'] = botDispatchPending(20);
         $out['bot_pruned'] = botPruneNotifications(30);
+    }
+    if ($task === 'remind' || $task === 'all') {
+        $out['remind'] = reminderAutoSend();
     }
     if ($task === 'health' || $task === 'all') {
         $sections = healthBuildSections();

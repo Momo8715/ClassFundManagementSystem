@@ -144,6 +144,37 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   r = await botReq('ping');
   ok(r.status === 401, '旧 Token 已失效', r.status);
 
+  // 指令开关保存/回读（验证“开关不了”不是后端丢配置）
+  r = await req('pay_reminder_cfg_get');
+  const cfg0 = (r.json && r.json.config) || {};
+  ok(Array.isArray(cfg0.commands) && cfg0.commands.some(c => c.key === 'pay'), '指令面板包含缴费命令', cfg0.commands);
+  r = await req('pay_reminder_cfg_save', 'POST', {
+    enabled: cfg0.enabled ? '1' : '0', type: cfg0.type || 'wecom',
+    webhook: cfg0.webhook_set ? '' : '', qq_appid: cfg0.qq_appid || '', qq_secret: '',
+    qq_targets: JSON.stringify(cfg0.qq_targets || []),
+    qq_cmd_disabled: JSON.stringify(['link']),
+    qq_menu_intro: cfg0.qq_menu_intro || '', qq_menu_footer: cfg0.qq_menu_footer || '',
+    qq_custom_replies: JSON.stringify(cfg0.qq_custom_replies || []),
+    qq_sandbox: cfg0.qq_sandbox ? '1' : '0', qq_c2c_open: cfg0.qq_c2c_open === false ? '0' : '1',
+    auto_remind: '1'
+  });
+  ok(r.status === 200 && r.json.ok, '保存指令开关/自动催缴', r);
+  r = await req('pay_reminder_cfg_get');
+  const cfg1 = (r.json && r.json.config) || {};
+  const linkCmd = (cfg1.commands || []).find(c => c.key === 'link');
+  ok(linkCmd && linkCmd.enabled === false, '停用指令后回读为 disabled', linkCmd);
+  ok(cfg1.auto_remind === true, '自动催缴开关回读', cfg1.auto_remind);
+  // 恢复原开关，避免影响后续 cron/群推送测试
+  r = await req('pay_reminder_cfg_save', 'POST', {
+    enabled: cfg0.enabled ? '1' : '0', type: cfg0.type || 'wecom',
+    webhook: cfg0.webhook_set ? '' : '', qq_appid: cfg0.qq_appid || '', qq_secret: '',
+    qq_targets: JSON.stringify(cfg0.qq_targets || []),
+    qq_cmd_disabled: '[]', qq_menu_intro: cfg0.qq_menu_intro || '', qq_menu_footer: cfg0.qq_menu_footer || '',
+    qq_custom_replies: JSON.stringify(cfg0.qq_custom_replies || []),
+    qq_sandbox: cfg0.qq_sandbox ? '1' : '0', qq_c2c_open: cfg0.qq_c2c_open === false ? '0' : '1',
+    auto_remind: '0'
+  });
+  ok(r.status === 200 && r.json.ok, '恢复指令/自动催缴开关', r);
   console.log('[凭证上传与自愈]');
   r = await uploadImage();
   ok(r.status === 200 && r.json.ok && r.json.id, '图片上传成功', r);
@@ -239,10 +270,13 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   r = await req('backup_list');
   const cronAll = r.json.cron_all_url || '';
   ok(cronAll.includes('cron.php?token='), '返回 cron URL', cronAll);
+  sql("REPLACE INTO system_meta (meta_key,meta_value) VALUES ('reminder_auto_enabled','1'),('reminder_auto_last','')");
   const origin = new URL(API_BASE).origin;
   const cronRes = await fetch(cronAll.replace(/^https?:\/\/[^/]+/, origin), { credentials: 'same-origin' });
   const cronJson = await cronRes.json().catch(() => ({}));
   ok(cronRes.status === 200 && cronJson.ok === true && cronJson.backup && cronJson.health, 'cron task=all', { status: cronRes.status, json: cronJson });
+  ok(cronJson.remind && cronJson.remind.ok === true, 'cron 自动催缴提醒执行', cronJson.remind);
+  sql("REPLACE INTO system_meta (meta_key,meta_value) VALUES ('reminder_auto_enabled','0')");
 
   mockServer.close();
   console.log('\n结果：' + pass + ' 通过 / ' + fail + ' 失败');
