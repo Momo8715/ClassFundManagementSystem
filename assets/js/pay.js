@@ -57,6 +57,14 @@
         sel.innerHTML = '<option value="0">请选择姓名</option>' + (meta.roster || []).map(function (s) {
           return '<option value="' + parseInt(s.id, 10) + '">' + esc(s.name) + (parseInt(s.exempt, 10) === 1 ? '（免缴）' : '') + '</option>';
         }).join('');
+        if (!meta.roster || !meta.roster.length) {
+          var emptyMsg = meta.can_view_all === false
+            ? '当前账号未绑定花名册学生，请联系班委绑定后再缴费'
+            : '花名册暂无学生，请先在「学生管理」添加学生';
+          sel.innerHTML = '<option value="0">' + emptyMsg + '</option>';
+          var emptyHint = document.getElementById('payAmountHint');
+          if (emptyHint) emptyHint.textContent = emptyMsg;
+        }
       }
       var rnd = document.getElementById('payRound');
       if (rnd) {
@@ -121,7 +129,13 @@
       var btn = document.getElementById('btnPayCreate');
       if (btn) btn.disabled = !cfg.enabled || avail.length === 0;
       window._payLoadOrders();
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) {
+      var failedSel = document.getElementById('payStudent');
+      if (failedSel) failedSel.innerHTML = '<option value="0">加载失败，请刷新重试</option>';
+      var failedHint = document.getElementById('payAmountHint');
+      if (failedHint) failedHint.textContent = '加载学生名单失败：' + e.message;
+      toast('加载学生名单失败：' + e.message, 'error');
+    }
   };
 
   window._payCreate = async function () {
