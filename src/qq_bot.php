@@ -575,7 +575,8 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
         $link = payBaseUrl() . '/pay.php?pay=' . $sid;
         qqReply($c, $scope, $target, $msgId,
             "【" . $bind['name'] . " 专属缴费链接】\n" . $link
-            . "\n\n点开后会自动选中你本人，直接在线缴纳。");
+            . "\n\n点开后会自动选中你本人，直接在线缴纳。"
+            . "\n备用入口：" . payBackupBaseUrl() . '/pay.php?pay=' . $sid);
         return;
     }
 
@@ -585,7 +586,8 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
         if (!$bind) { qqReply($c, $scope, $target, $msgId, $noBind); return; }
         qqReply($c, $scope, $target, $msgId,
             "【" . $bind['name'] . " 专属缴费链接】\n" . payBaseUrl() . '/pay.php?pay=' . (int)$bind['student_id']
-            . "\n\n点开后选择本人姓名即可在线缴纳。");
+            . "\n\n点开后选择本人姓名即可在线缴纳。"
+            . "\n备用入口：" . payBackupBaseUrl() . '/pay.php?pay=' . (int)$bind['student_id']);
         return;
     }
 

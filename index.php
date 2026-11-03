@@ -7,6 +7,10 @@ require_once __DIR__ . '/config.php';
 // 机器人插件 API（v1.18）：/?bot_api=1&action=...&token=...
 // 具体路由见 src/bot_api.php；支持 X-Bot-Token 请求头。
 if (isset($_GET['bot_api'])) {
+    // 机器人接口响应绝不缓存（Cloudflare 曾把 ?bot_api=1 的 JSON 缓存 12h）
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+    header('X-Accel-Expires: 0');
     if (!isDbInstalled()) {
         http_response_code(503);
         echo json_encode(['ok' => false, 'error' => '系统未安装'], JSON_UNESCAPED_UNICODE);

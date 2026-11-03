@@ -26,12 +26,20 @@ function epayVerify(array $params, string $key): bool {
 }
 
 // ==================== URL / 金额 ====================
+// 在线缴费固定使用主域名；管理后台/API 仍可从任意域名进入。
+// 如需临时切到备用域名，可在 system_meta 设置 pay_public_base=https://classfund.陌沫.cn
+const PAY_PUBLIC_PRIMARY = 'https://classfund.hw.陌沫.cn';
+const PAY_PUBLIC_BACKUP  = 'https://classfund.陌沫.cn';
+
 function payBaseUrl(): string {
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $https = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off')
-        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
-        || !empty($_SERVER['HTTP_CF_CONNECTING_IP']);
-    return ($https ? 'https://' : 'http://') . $host;
+    $forced = trim((string)getMeta('pay_public_base', ''));
+    if ($forced !== '') return rtrim($forced, '/');
+    return PAY_PUBLIC_PRIMARY;
+}
+
+function payBackupBaseUrl(): string {
+    $forced = trim((string)getMeta('pay_public_backup', ''));
+    return $forced !== '' ? rtrim($forced, '/') : PAY_PUBLIC_BACKUP;
 }
 function payNotifyUrl(): string {
     $c = getPayConfig();
