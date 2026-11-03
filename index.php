@@ -34,6 +34,13 @@ if (session_status() === PHP_SESSION_NONE && !empty($_COOKIE[session_name()])) {
 }
 $loggedIn = isset($_SESSION['user_id']);
 
+// 未登录时，旧的 ?pay= / ?student= 链接直接转到免登录缴费页
+if (!$loggedIn && (isset($_GET['pay']) || isset($_GET['student']))) {
+    $sid = (int)($_GET['pay'] ?? $_GET['student'] ?? 0);
+    header('Location: pay.php' . ($sid > 0 ? '?pay=' . $sid : ''));
+    exit;
+}
+
 // 缓存策略：未登录访客的登录页输出可缓存头（配合 Cloudflare 缓存规则，访客打开即秒开）；
 // 已登录/访客会话用户输出 no-store，且请求带 PHPSESSID Cookie，由 CF 规则自动绕过缓存，数据保持实时
 if ($loggedIn) {
