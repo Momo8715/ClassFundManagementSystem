@@ -28,8 +28,8 @@ function epayVerify(array $params, string $key): bool {
 // ==================== URL / 金额 ====================
 // 在线缴费固定使用主域名；管理后台/API 仍可从任意域名进入。
 // 如需临时切到备用域名，可在 system_meta 设置 pay_public_base=https://classfund.陌沫.cn
-const PAY_PUBLIC_PRIMARY = 'https://classfund.陌沫.cn';
-const PAY_PUBLIC_BACKUP  = 'https://classfund.陌沫.cn';
+const PAY_PUBLIC_PRIMARY = 'https://classfund.hw.xn--gvwz10g.cn';
+const PAY_PUBLIC_BACKUP  = 'https://classfund.xn--gvwz10g.cn';
 
 function payBaseUrl(): string {
     $forced = trim((string)getMeta('pay_public_base', ''));
