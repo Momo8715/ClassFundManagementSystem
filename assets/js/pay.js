@@ -405,8 +405,12 @@
   var reminderData = null;
 
   function payLink(sid) {
-    var base = location.origin + location.pathname;
-    return base + (base.indexOf('?') >= 0 ? '&' : '?') + 'pay=' + encodeURIComponent(sid);
+    // 与机器人「缴费 / 我的链接」、插件接口 paylink 完全一致：固定指向免登录缴费页 pay.php，
+    // 域名取服务端主域名 pay_base。原实现用 location.origin + location.pathname，
+    // 等于「从哪个域名、哪个页面进后台，就复制出哪个域名的链接」，与微信发出的链接对不上。
+    var b = (meta && meta.pay_base) ? String(meta.pay_base)
+      : (location.origin + location.pathname.replace(/[^\/]*$/, ''));
+    return b.replace(/\/+$/, '') + '/pay.php?pay=' + encodeURIComponent(sid);
   }
 
   function copyText(text, btn) {

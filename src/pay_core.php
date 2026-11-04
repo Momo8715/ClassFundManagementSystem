@@ -418,6 +418,10 @@ function handlePayMeta() {
         'fee_status' => $feeStatus,
         'own_student_id' => $ownId,
         'can_view_all' => $canViewAll,
+        // 缴费链接统一用服务端主域名（payBaseUrl），与机器人「缴费 / 我的链接」、插件 paylink
+        // 返回的链接逐字符一致；否则从哪个域名、哪个页面进后台，就会复制出哪个域名的链接。
+        'pay_base' => payBaseUrl(),
+        'pay_backup_base' => payBackupBaseUrl(),
         'config' => [
             'enabled' => payConfigured(),
             'settle_mode' => $cfg['settle_mode'],
