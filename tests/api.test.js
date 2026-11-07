@@ -86,7 +86,7 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   await new Promise(function (resolve) { mockServer.listen(0, '127.0.0.1', resolve); });
   const mockPort = mockServer.address().port;
   r = await botReq('ping');
-  ok(r.status === 200 && r.json.ok && r.json.data.version === '1.18.1', 'bot ping', r);
+  ok(r.status === 200 && r.json.ok && r.json.data.version === '1.18.2', 'bot ping', r);
   r = await botReq('ping', { token: 'wrong-token' });
   ok(r.status === 401, 'bot token 错误被拒绝', r.status);
   r = await botReq('bind', { channel: 'wechat', user: 'remote-test-1', name: '张三' });
