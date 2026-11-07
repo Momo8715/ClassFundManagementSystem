@@ -92,8 +92,8 @@ function reminderSummary(): array {
         }
     }
     $lines[] = '';
-    $lines[] = '在线缴费入口：' . $base . '/pay.php';
-    if (payBackupBaseUrl() !== payBaseUrl()) $lines[] = '备用入口：' . payBackupBaseUrl() . '/pay.php';
+    $lines[] = '在线缴费入口：' . $base . '/';
+    if (payBackupBaseUrl() !== payBaseUrl()) $lines[] = '备用入口：' . payBackupBaseUrl() . '/';
     $text = implode("\n", $lines);
     return ['text' => $text, 'summary' => $text, 'count' => count($unpaid), 'total' => round($total, 2), 'unpaid' => $unpaid, 'base_url' => $base];
 }

@@ -46,6 +46,8 @@ require_once __DIR__ . '/src/import_batches.php';
 require_once __DIR__ . '/src/backup.php';
 require_once __DIR__ . '/src/report.php';
 require_once __DIR__ . '/src/pay.php';
+require_once __DIR__ . '/src/myfee.php';
+require_once __DIR__ . '/src/community.php';
 require_once __DIR__ . '/src/health.php';
 require_once __DIR__ . '/src/upgrade.php';
 
@@ -97,6 +99,13 @@ $actionMethods = [
     'pay_create' => ['POST'],
     'pay_public_meta' => ['GET'],
     'pay_public_create' => ['POST'],
+    'my_fee' => ['GET'],
+    'my_orders' => ['GET'],
+    'my_receipt' => ['GET'],
+    'announcements' => ['GET', 'POST'],
+    'votes' => ['GET', 'POST'],
+    'offline_payment' => ['POST'],
+    'refund' => ['POST'],
     'pay_config_get' => ['GET'],
     'pay_config_save' => ['POST'],
     'pay_reminders' => ['GET'],
@@ -309,6 +318,27 @@ switch ($action) {
         break;
     case 'pay_public_create':
         handlePayCreate(true);
+        break;
+    case 'my_fee':
+        handleMyFee();
+        break;
+    case 'my_orders':
+        handleMyOrders();
+        break;
+    case 'my_receipt':
+        handleMyReceipt();
+        break;
+    case 'announcements':
+        handleAnnouncements($method);
+        break;
+    case 'votes':
+        handleVotes($method);
+        break;
+    case 'offline_payment':
+        handleOfflinePayment();
+        break;
+    case 'refund':
+        handleRefund();
         break;
     case 'pay_notify':
         handlePayNotify();

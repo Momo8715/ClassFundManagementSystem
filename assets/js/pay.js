@@ -166,9 +166,31 @@
     finally { if (btn) btn.disabled = false; }
   };
 
+  async function payAdminPost(action, data) {
+    data = data || {}; data.csrf_token = window._initialCsrf || '';
+    var r = await fetch('api.php?action=' + encodeURIComponent(action), { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(data).toString() });
+    var j = {}; try { j = await r.json(); } catch (e) {}
+    if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
+    return j;
+  }
+  window._offlinePayPrompt = async function () {
+    var name = prompt('线下缴费学生姓名'); if (!name) return;
+    var amount = prompt('金额（元）'); if (!amount) return;
+    var method = prompt('方式（现金/微信/支付宝）', '现金') || '现金';
+    try { var d = await payAdminPost('offline_payment', { name: name, amount: amount, method: method }); toast('已登记 ' + (d.name || name) + ' ¥' + Number(d.amount).toFixed(2)); window._payLoadOrders && window._payLoadOrders(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+  window._refundPrompt = async function () {
+    var name = prompt('退款学生姓名'); if (!name) return;
+    var amount = prompt('退款金额（元）'); if (!amount) return;
+    var reason = prompt('退款原因（可选）') || '';
+    try { var d = await payAdminPost('refund', { name: name, amount: amount, reason: reason }); toast('已登记退款 ' + (d.name || name) + ' ¥' + Number(d.amount).toFixed(2)); window._payLoadOrders && window._payLoadOrders(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+
   window._payLoadOrders = async function () {
     var el = document.getElementById('payOrdersTable');
-    if (!el || !window._initialUser) return;
+    if (!el || !window._initialUser || window._initialUser.is_guest) return;
     try {
       var d = await api('pay_orders', { status: val('payOrderStatus') });
       var s = d.summary || {};

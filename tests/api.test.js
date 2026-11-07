@@ -95,7 +95,7 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   r = await botReq('whoami', { channel: 'wechat', user: 'remote-test-1' });
   ok(r.status === 200 && r.json.data.bound === true && r.json.data.name === '张三', '插件 whoami 持久化绑定', r);
   r = await botReq('paylink', { channel: 'wechat', user: 'remote-test-1' });
-  ok(r.status === 200 && /\/pay\.php\?pay=/.test(r.json.data.url), '插件缴费链接指向免登录缴费页', r.json && r.json.data);
+  ok(r.status === 200 && /\?pay=\d+/.test(r.json.data.url), '插件缴费链接指向原应用在线缴费页', r.json && r.json.data);
   r = await botReq('pay', { channel: 'wechat', user: 'remote-test-1' });
   ok(r.status === 400 || r.status === 502, '未配置支付通道时插件缴费返回明确错误', r);
   sql("REPLACE INTO system_meta (meta_key,meta_value) VALUES ('reminder_type','custom'),('reminder_webhook','http://127.0.0.1:" + mockPort + "/hook'),('bot_push_enabled','1')");

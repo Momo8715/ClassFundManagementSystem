@@ -239,6 +239,128 @@ function handleBotApi(): void {
                 usort($rows, static fn($a, $b) => $b['outstanding'] <=> $a['outstanding']);
                 botApiOut(['count' => count($rows), 'items' => array_slice($rows, 0, $limit)]);
 
+            case 'my_fee':
+                $channel = botApiChannel();
+                $user = botApiUser();
+                $b = botBindingGet($channel, $user);
+                if (!$b) botApiErr('该用户尚未绑定姓名', 404);
+                $sid = (int)$b['student_id'];
+                $st = feeStudentStatus($sid);
+                $rounds = [];
+                foreach (feeRounds(false) as $r) {
+                    $pr = $st['per_round'][(int)$r['id']] ?? null;
+                    $rounds[] = ['date' => (string)$r['date'], 'description' => (string)$r['description'],
+                        'due' => round((float)($pr['due'] ?? 0), 2), 'paid' => round((float)($pr['paid'] ?? 0), 2)];
+                }
+                botApiOut(['name' => (string)$b['name'], 'due' => (float)$st['due'], 'paid' => (float)$st['paid'],
+                    'outstanding' => (float)$st['outstanding'], 'rounds' => $rounds,
+                    'url' => payBaseUrl() . '/?pay=' . $sid . '#page-pay']);
+
+            case 'orders':
+                $channel = botApiChannel();
+                $user = botApiUser();
+                $who = trim((string)($_GET['name'] ?? ($_POST['name'] ?? '')));
+                if ($who !== '') {
+                    $hit = botStudentByName($who);
+                    if ($hit === null) botApiErr('花名册中没有「' . $who . '」', 404);
+                    $sid = (int)$hit['id']; $name = (string)$hit['name'];
+                } else {
+                    $b = botBindingGet($channel, $user);
+                    if (!$b) botApiErr('该用户尚未绑定姓名', 404);
+                    $sid = (int)$b['student_id']; $name = (string)$b['name'];
+                }
+                $q = db()->prepare("SELECT order_no, amount, channel, status, settled, created_at, paid_at FROM payment_orders WHERE student_id=:sid ORDER BY id DESC LIMIT 20");
+                $q->execute([':sid' => $sid]);
+                botApiOut(['name' => $name, 'orders' => $q->fetchAll()]);
+
+            case 'reminder_target':
+                $name = trim((string)($_GET['name'] ?? ($_POST['name'] ?? '')));
+                if ($name === '') botApiErr('缺少 name');
+                $hit = botStudentByName($name);
+                if ($hit === null) botApiErr('花名册中没有「' . $name . '」', 404);
+                $sid = (int)$hit['id'];
+                $st = feeStudentStatus($sid);
+                $q = db()->prepare("SELECT channel, remote_user, name FROM bot_bindings WHERE student_id=:sid ORDER BY id DESC LIMIT 5");
+                $q->execute([':sid' => $sid]);
+                $items = $q->fetchAll();
+                if (!$items) botApiErr('该学生还没有绑定机器人账号', 404);
+                $out = ['student_id' => $sid, 'name' => (string)$hit['name'], 'outstanding' => (float)$st['outstanding'],
+                    'items' => $items, 'text' => '【班费提醒】' . $hit['name'] . ' 待缴 ¥' . number_format((float)$st['outstanding'], 2, '.', '')
+                        . '\n在线缴费：' . payBaseUrl() . '/?pay=' . $sid . '#page-pay'];
+                botApiOut($out);
+
+            case 'ann_list':
+                $items = json_decode(getMeta('announcements_v1', '[]'), true) ?: [];
+                $out = [];
+                foreach (array_reverse($items) as $it) {
+                    if (!empty($it['expires_at']) && (string)$it['expires_at'] < date('Y-m-d H:i:s')) continue;
+                    $out[] = ['title' => (string)$it['title'], 'content' => (string)$it['content'], 'created_at' => (string)$it['created_at'], 'created_by' => (string)($it['created_by'] ?? '')];
+                    if (count($out) >= 5) break;
+                }
+                botApiOut(['items' => $out]);
+
+            case 'ann_create':
+                $title = trim((string)($_GET['title'] ?? ($_POST['title'] ?? '')));
+                $content = trim((string)($_GET['content'] ?? ($_POST['content'] ?? '')));
+                if ($title === '' || $content === '') botApiErr('请提供 title/content');
+                $items = json_decode(getMeta('announcements_v1', '[]'), true) ?: [];
+                $items[] = ['id' => (int)(microtime(true) * 1000), 'title' => mb_substr($title, 0, 100), 'content' => mb_substr($content, 0, 5000), 'pinned' => false, 'created_by' => '机器人', 'created_at' => date('Y-m-d H:i:s'), 'expires_at' => '', 'read_by' => []];
+                setMeta('announcements_v1', json_encode(array_slice($items, -100), JSON_UNESCAPED_UNICODE));
+                botApiOut(['ok' => true]);
+
+            case 'vote_list':
+                $votes = json_decode(getMeta('votes_v1', '[]'), true) ?: [];
+                $out = [];
+                foreach (array_reverse($votes) as $v) {
+                    if (!empty($v['closed'])) continue;
+                    $counts = [];
+                    foreach (($v['options'] ?? []) as $o) $counts[(string)$o] = 0;
+                    foreach (($v['ballots'] ?? []) as $pick) foreach ((array)$pick as $o) if (isset($counts[(string)$o])) $counts[(string)$o]++;
+                    $out[] = ['id' => (int)$v['id'], 'title' => (string)$v['title'], 'options' => $v['options'] ?? [], 'counts' => $counts, 'total' => count($v['ballots'] ?? [])];
+                    if (count($out) >= 5) break;
+                }
+                botApiOut(['items' => $out]);
+
+            case 'vote_create':
+                $title = trim((string)($_GET['title'] ?? ($_POST['title'] ?? '')));
+                $options = (string)($_GET['options'] ?? ($_POST['options'] ?? ''));
+                $opts = array_values(array_filter(array_map('trim', preg_split('/[\n,，|]+/', $options)), function ($x) { return $x !== ''; }));
+                if ($title === '' || count($opts) < 2) botApiErr('请提供 title 和至少两个 options');
+                $votes = json_decode(getMeta('votes_v1', '[]'), true) ?: [];
+                $votes[] = ['id' => (int)(microtime(true) * 1000), 'title' => mb_substr($title, 0, 200), 'options' => array_slice($opts, 0, 10), 'deadline' => '', 'multi' => false, 'created_by' => '机器人', 'created_at' => date('Y-m-d H:i:s'), 'closed' => false, 'ballots' => []];
+                setMeta('votes_v1', json_encode(array_slice($votes, -50), JSON_UNESCAPED_UNICODE));
+                botApiOut(['ok' => true]);
+
+            case 'offline_pay':
+                $name = trim((string)($_GET['name'] ?? ($_POST['name'] ?? '')));
+                $amount = round((float)($_GET['amount'] ?? ($_POST['amount'] ?? 0)), 2);
+                $roundId = (int)($_GET['round_id'] ?? ($_POST['round_id'] ?? 0));
+                $method = mb_substr(trim((string)($_GET['method'] ?? ($_POST['method'] ?? 'cash'))), 0, 30);
+                $note = mb_substr(trim((string)($_GET['note'] ?? ($_POST['note'] ?? ''))), 0, 200);
+                if ($name === '' || $amount <= 0) botApiErr('请提供 name 和 amount');
+                $hit = botStudentByName($name);
+                if ($hit === null) botApiErr('花名册中没有「' . $name . '」', 404);
+                $orderNo = 'OFF' . date('YmdHis') . strtoupper(bin2hex(random_bytes(3)));
+                db()->prepare("INSERT INTO fee_payments (order_no, student_id, student_name, round_id, amount, channel, trade_no, paid_at)
+                    VALUES (:o, :sid, :sn, :rid, :a, :ch, :t, NOW())")
+                    ->execute([':o' => $orderNo, ':sid' => (int)$hit['id'], ':sn' => $hit['name'], ':rid' => $roundId,
+                        ':a' => $amount, ':ch' => 'offline:' . ($method ?: 'cash'), ':t' => $note]);
+                $attr = payAttributeToRounds((int)$hit['id'], $roundId, $amount);
+                botApiOut(['ok' => true, 'order_no' => $orderNo, 'name' => $hit['name'], 'amount' => $amount, 'merged' => $attr['merged'], 'rest' => $attr['rest']]);
+
+            case 'refund':
+                $name = trim((string)($_GET['name'] ?? ($_POST['name'] ?? '')));
+                $amount = round((float)($_GET['amount'] ?? ($_POST['amount'] ?? 0)), 2);
+                $reason = mb_substr(trim((string)($_GET['reason'] ?? ($_POST['reason'] ?? ''))), 0, 200);
+                if ($name === '' || $amount <= 0) botApiErr('请提供 name 和 amount');
+                $hit = botStudentByName($name);
+                if ($hit === null) botApiErr('花名册中没有「' . $name . '」', 404);
+                $orderNo = 'REF' . date('YmdHis') . strtoupper(bin2hex(random_bytes(3)));
+                db()->prepare("INSERT INTO fee_payments (order_no, student_id, student_name, round_id, amount, channel, trade_no, paid_at)
+                    VALUES (:o, :sid, :sn, 0, :a, 'refund', :t, NOW())")
+                    ->execute([':o' => $orderNo, ':sid' => (int)$hit['id'], ':sn' => $hit['name'], ':a' => -abs($amount), ':t' => $reason]);
+                botApiOut(['ok' => true, 'order_no' => $orderNo, 'name' => $hit['name'], 'amount' => $amount]);
+
             case 'summary':
                 $all = feeAllStatuses();
                 $due = $paid = $outstanding = 0.0; $unpaidCount = 0; $exemptCount = 0;
@@ -258,6 +380,10 @@ function handleBotApi(): void {
                 if ($name === '') botApiErr('缺少 name');
                 $hit = botStudentByName($name);
                 if ($hit === null) botApiErr('花名册中没有「' . $name . '」', 404);
+                $codes = json_decode(getMeta('bind_codes_v1', '{}'), true) ?: [];
+                $expect = trim((string)($codes[(string)$hit['id']] ?? ''));
+                $given = trim((string)($_GET['code'] ?? ($_POST['code'] ?? '')));
+                if ($expect !== '' && !hash_equals($expect, $given)) botApiErr('身份校验失败：请发送「绑定 姓名 验证码」', 403);
                 $b = botBindingSet($channel, $user, (int)$hit['id'], (string)$hit['name']);
                 botApiOut($b + ['ok' => true]);
 
@@ -283,8 +409,8 @@ function handleBotApi(): void {
                 if ($st === null) botApiErr('未找到缴费数据', 404);
                 $payData = ['name' => (string)$b['name'], 'student_id' => $sid,
                     'outstanding' => (float)$st['outstanding'],
-                    'url' => payBaseUrl() . '/pay.php?pay=' . $sid];
-                if (payBackupBaseUrl() !== payBaseUrl()) $payData['backup_url'] = payBackupBaseUrl() . '/pay.php?pay=' . $sid;
+                    'url' => payBaseUrl() . '/?pay=' . $sid];
+                if (payBackupBaseUrl() !== payBaseUrl()) $payData['backup_url'] = payBackupBaseUrl() . '/?pay=' . $sid;
                 botApiOut($payData);
 
             case 'pay':
@@ -316,9 +442,20 @@ function handleBotApi(): void {
                 if ($id <= 0) botApiErr('写入通知失败', 500);
                 botApiOut(['id' => $id, 'queued' => true]);
 
+            case 'set_bind_code':
+                $name = trim((string)($_GET['name'] ?? ($_POST['name'] ?? '')));
+                $code = trim((string)($_GET['code'] ?? ($_POST['code'] ?? '')));
+                if ($name === '' || $code === '') botApiErr('缺少 name/code');
+                $hit = botStudentByName($name);
+                if ($hit === null) botApiErr('花名册中没有「' . $name . '」', 404);
+                $codes = json_decode(getMeta('bind_codes_v1', '{}'), true) ?: [];
+                $codes[(string)$hit['id']] = mb_substr($code, 0, 20);
+                setMeta('bind_codes_v1', json_encode($codes, JSON_UNESCAPED_UNICODE));
+                botApiOut(['ok' => true, 'name' => (string)$hit['name'], 'code_set' => true]);
+
             case 'help':
             case 'actions':
-                botApiOut(['actions' => ['ping', 'roster', 'status', 'unpaid', 'summary', 'bind', 'whoami', 'paylink', 'pay', 'poll', 'ack', 'notify'], 'version' => '1.18.0']);
+                botApiOut(['actions' => ['ping', 'roster', 'status', 'unpaid', 'summary', 'bind', 'whoami', 'paylink', 'pay', 'my_fee', 'orders', 'reminder_target', 'offline_pay', 'refund', 'ann_list', 'ann_create', 'vote_list', 'vote_create', 'poll', 'ack', 'notify', 'set_bind_code'], 'version' => '1.18.0']);
 
             default:
                 botApiErr('未知 action', 404);

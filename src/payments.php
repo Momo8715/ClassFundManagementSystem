@@ -198,3 +198,60 @@ function handleExportUnpaid() {
     outputSimpleXlsx('欠费名单_' . date('Ymd_His'), '欠费名单', $headers, $rows);
     exit;
 }
+
+// ==================== 线下缴费 / 退款 ====================
+function handleOfflinePayment() {
+    requirePermission('manageRoster');
+    requireCsrfToken();
+    $in = jsonInput();
+    $sid = (int)($in['student_id'] ?? 0);
+    $amount = round((float)($in['amount'] ?? 0), 2);
+    $roundId = (int)($in['round_id'] ?? 0);
+    if ($sid <= 0 && trim((string)($in['name'] ?? '')) !== '') {
+        $q = db()->prepare("SELECT id FROM class_roster WHERE name=:n LIMIT 1");
+        $q->execute([':n' => trim((string)$in['name'])]);
+        $sid = (int)$q->fetchColumn();
+    }
+    $method = mb_substr(trim((string)($in['method'] ?? 'cash')), 0, 30);
+    $note = mb_substr(trim((string)($in['note'] ?? '')), 0, 200);
+    if ($sid <= 0 || $amount <= 0) jsonOutput(['error' => '请选择学生并填写正确金额'], 400);
+    $st = db()->prepare("SELECT id, name FROM class_roster WHERE id=:id");
+    $st->execute([':id' => $sid]);
+    $row = $st->fetch();
+    if (!$row) jsonOutput(['error' => '学生不存在'], 404);
+    $orderNo = 'OFF' . date('YmdHis') . strtoupper(bin2hex(random_bytes(3)));
+    db()->prepare("INSERT INTO fee_payments (order_no, student_id, student_name, round_id, amount, channel, trade_no, paid_at)
+        VALUES (:o, :sid, :sn, :rid, :a, :ch, :t, NOW())")
+        ->execute([':o' => $orderNo, ':sid' => $sid, ':sn' => $row['name'], ':rid' => $roundId,
+            ':a' => $amount, ':ch' => 'offline:' . ($method ?: 'cash'), ':t' => $note]);
+    $attr = payAttributeToRounds($sid, $roundId, $amount);
+    $u = currentUser();
+    addLog((int)$u['id'], (string)$u['username'], 'offline_payment', 'payment', $sid, ['amount' => $amount, 'order_no' => $orderNo, 'method' => $method]);
+    jsonOutput(['ok' => true, 'order_no' => $orderNo, 'amount' => $amount, 'name' => $row['name'], 'merged' => $attr['merged'], 'rest' => $attr['rest']]);
+}
+
+function handleRefund() {
+    requirePermission('manageRoster');
+    requireCsrfToken();
+    $in = jsonInput();
+    $sid = (int)($in['student_id'] ?? 0);
+    $amount = round((float)($in['amount'] ?? 0), 2);
+    $reason = mb_substr(trim((string)($in['reason'] ?? '')), 0, 200);
+    if ($sid <= 0 && trim((string)($in['name'] ?? '')) !== '') {
+        $q = db()->prepare("SELECT id FROM class_roster WHERE name=:n LIMIT 1");
+        $q->execute([':n' => trim((string)$in['name'])]);
+        $sid = (int)$q->fetchColumn();
+    }
+    if ($sid <= 0 || $amount <= 0) jsonOutput(['error' => '请选择学生并填写退款金额'], 400);
+    $st = db()->prepare("SELECT id, name FROM class_roster WHERE id=:id");
+    $st->execute([':id' => $sid]);
+    $row = $st->fetch();
+    if (!$row) jsonOutput(['error' => '学生不存在'], 404);
+    $orderNo = 'REF' . date('YmdHis') . strtoupper(bin2hex(random_bytes(3)));
+    db()->prepare("INSERT INTO fee_payments (order_no, student_id, student_name, round_id, amount, channel, trade_no, paid_at)
+        VALUES (:o, :sid, :sn, 0, :a, 'refund', :t, NOW())")
+        ->execute([':o' => $orderNo, ':sid' => $sid, ':sn' => $row['name'], ':a' => -abs($amount), ':t' => $reason]);
+    $uid = (int)(currentUser()['id'] ?? 0);
+    addLog($uid, (string)(currentUser()['username'] ?? ''), 'refund', 'payment', $sid, ['amount' => $amount, 'order_no' => $orderNo, 'reason' => $reason]);
+    jsonOutput(['ok' => true, 'order_no' => $orderNo, 'amount' => $amount, 'name' => $row['name']]);
+}

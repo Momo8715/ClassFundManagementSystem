@@ -134,10 +134,12 @@ function botNotifyPaymentSuccess(array $order): int {
     $title = '班费到账';
     $content = "【班费到账】\n" . $name . ' 已缴纳 ' . botNotifyMoney($amount)
         . "\n订单：{$orderNo}" . ($channel !== '' ? "\n方式：{$channel}" : '')
-        . "\n时间：{$paidAt}";
+        . "\n时间：{$paidAt}"
+        . (function_exists('payBaseUrl') && $sid > 0 ? "\n查看：\n" . payBaseUrl() . '/?pay=' . $sid . '#page-pay' : '');
     return botNotifyCreate('payment_success', $title, $content, [
         'order_no' => $orderNo, 'student_id' => $sid, 'student_name' => $name,
         'amount' => round($amount, 2), 'channel' => $channel, 'trade_no' => (string)($order['trade_no'] ?? ''),
+        'pay_url' => function_exists('payBaseUrl') && $sid > 0 ? payBaseUrl() . '/?pay=' . $sid . '#page-pay' : '',
     ], 'payment:' . $orderNo, $sid, $name);
 }
 

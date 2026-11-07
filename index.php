@@ -38,11 +38,21 @@ if (session_status() === PHP_SESSION_NONE && !empty($_COOKIE[session_name()])) {
 }
 $loggedIn = isset($_SESSION['user_id']);
 
-// 未登录时，旧的 ?pay= / ?student= 链接直接转到免登录缴费页
+// 缴费深链：未登录时自动以访客身份进入原应用，不走单独的缴费页
 if (!$loggedIn && (isset($_GET['pay']) || isset($_GET['student']))) {
-    $sid = (int)($_GET['pay'] ?? $_GET['student'] ?? 0);
-    header('Location: pay.php' . ($sid > 0 ? '?pay=' . $sid : ''));
-    exit;
+    startSession();
+    $_SESSION['user_id'] = 0;
+    $_SESSION['username'] = '同学（访客）';
+    $_SESSION['roles'] = ['student'];
+    $_SESSION['is_guest'] = true;
+    $_SESSION['roster_id'] = 0;
+    $_SESSION['student_name'] = '';
+    $_SESSION['totp_enabled'] = false;
+    $_SESSION['must_change_password'] = false;
+    $_SESSION['must_enable_2fa'] = false;
+    $_SESSION['banned'] = false;
+    generateCsrfToken();
+    $loggedIn = true;
 }
 
 // 缓存策略：未登录访客的登录页输出可缓存头（配合 Cloudflare 缓存规则，访客打开即秒开）；
@@ -196,7 +206,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
             <p class="hint" id="loginError" style="color:var(--danger);display:none"></p>
             <p class="hint" id="loginDebug" style="color:#f59e0b;display:none;margin-top:4px;font-size:11px"></p>
             <p class="hint">💡 账号由管理员添加，不支持自行注册</p>
-            <p class="hint" style="margin-top:10px"><a href="pay.php" style="color:#93c5fd;text-decoration:none">💳 在线缴费（免登录）</a></p>
+            <p class="hint" style="margin-top:10px"><a href="?pay=0" style="color:#93c5fd;text-decoration:none">💳 在线缴费（免登录）</a></p>
         </div>
     </div>
 
@@ -235,6 +245,12 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                 </button>
                 <button data-page="pay" onclick="switchPage('pay')" id="navPay">
                     <span class="icon">💳</span> 在线缴费
+                </button>
+                <button data-page="myfee" onclick="switchPage('myfee');window._myFeeLoad&&window._myFeeLoad()" id="navMyFee">
+                    <span class="icon">📒</span> 我的班费
+                </button>
+                <button data-page="community" onclick="switchPage('community');window._communityLoad&&window._communityLoad()" id="navCommunity">
+                    <span class="icon">📢</span> 公告投票
                 </button>
                 <button data-page="payments" onclick="switchPage('payments');window._payLoadOrders&&window._payLoadOrders()" id="navPayments">
                     <span class="icon">📋</span> 缴费情况
@@ -465,6 +481,10 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <div style="display:flex;gap:8px;flex-wrap:wrap">
                         <button class="btn btn-outline btn-sm" onclick="renderPayments()">🔄 刷新</button>
                         <button class="btn btn-outline btn-sm" onclick="exportUnpaid()">📥 导出欠费名单</button>
+                        <?php if (hasPermission('manageRoster')): ?>
+                        <button class="btn btn-outline btn-sm" onclick="window._offlinePayPrompt&&window._offlinePayPrompt()">💵 线下缴费</button>
+                        <button class="btn btn-outline btn-sm" onclick="window._refundPrompt&&window._refundPrompt()">↩️ 退款</button>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px" data-tabscope="payTabs">
@@ -529,6 +549,31 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- 公告 / 投票 -->
+            <div class="page" id="page-community">
+                <div class="section-header"><h3>📢 班级公告</h3><button class="btn btn-outline btn-sm" onclick="window._communityLoad&&window._communityLoad()">🔄 刷新</button></div>
+                <div id="announcementAdmin" style="display:none;margin-bottom:10px">
+                    <input id="annTitle" placeholder="公告标题" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:220px">
+                    <input id="annContent" placeholder="公告内容" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:320px">
+                    <button class="btn btn-primary btn-sm" onclick="window._annCreate&&window._annCreate()">发布</button>
+                </div>
+                <div id="announcementList"><div class="empty">加载中...</div></div>
+                <div class="section-header" style="margin-top:18px"><h3>🗳️ 班费投票</h3></div>
+                <div id="voteAdmin" style="display:none;margin-bottom:10px">
+                    <input id="voteTitle" placeholder="投票问题" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:260px">
+                    <input id="voteOptions" placeholder="选项，用逗号/换行分隔" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text);width:360px">
+                    <label style="font-size:12px"><input type="checkbox" id="voteMulti"> 多选</label>
+                    <button class="btn btn-primary btn-sm" onclick="window._voteCreate&&window._voteCreate()">发起投票</button>
+                </div>
+                <div id="voteList"><div class="empty">加载中...</div></div>
+            </div>
+
+            <!-- 我的班费（学生个人明细/订单/收据） -->
+            <div class="page" id="page-myfee">
+                <div class="section-header"><h3>📒 我的班费</h3><button class="btn btn-outline btn-sm" onclick="window._myFeeLoad&&window._myFeeLoad()">🔄 刷新</button></div>
+                <div id="myFeeContent"><div class="empty">加载中...</div></div>
             </div>
 
             <!-- 在线缴费（所有登录/访客用户） -->
@@ -1043,7 +1088,9 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
     <script src="assets/js/security.js?v=5" defer data-cfasync="false"></script>
     <!-- 在线支付面板（v1.8.1） -->
-    <script src="assets/js/pay.js?v=27" defer data-cfasync="false"></script>
+    <script src="assets/js/pay.js?v=28" defer data-cfasync="false"></script>
+    <script src="assets/js/myfee.js?v=1" defer data-cfasync="false"></script>
+    <script src="assets/js/community.js?v=1" defer data-cfasync="false"></script>
     <!-- 通用二级分类页签（多分栏页面） -->
     <script src="assets/js/tabs.js?v=2" defer data-cfasync="false"></script>
     <!-- 收支弹窗「班费收缴」简化模式 -->
@@ -1072,7 +1119,35 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
         document.querySelector('.app').classList.add('active');
         // app.js 为 defer 加载：DOMContentLoaded 时 window.switchPage 已导出
         window.addEventListener('DOMContentLoaded', function () {
-            window.switchPage && window.switchPage('dashboard');
+            var q = new URLSearchParams(location.search);
+            var sid = parseInt(q.get('pay') || q.get('student') || '0', 10);
+            var page = q.get('page') || '';
+            if (page === 'myfee') {
+                window.switchPage && window.switchPage('myfee');
+                setTimeout(function () { window._myFeeLoad && window._myFeeLoad(); }, 400);
+                return;
+            }
+            if (page === 'community') {
+                window.switchPage && window.switchPage('community');
+                setTimeout(function () { window._communityLoad && window._communityLoad(); }, 400);
+                return;
+            }
+            if (sid > 0) {
+                window.__payPreselect = sid;
+                window.switchPage && window.switchPage('pay');
+                // pay.js 初始化后再次确保选中（避免异步初始化把选中重置为 0）
+                setTimeout(function () {
+                    var sel = document.getElementById('payStudent');
+                    if (sel && sid > 0 && sel.value === '0' && sel.querySelector('option[value="' + sid + '"]')) {
+                        sel.value = String(sid);
+                        sel.dispatchEvent(new Event('change'));
+                    }
+                }, 1200);
+            } else if (location.hash === '#page-pay') {
+                window.switchPage && window.switchPage('pay');
+            } else {
+                window.switchPage && window.switchPage('dashboard');
+            }
         });
     </script>
     <?php endif; ?>

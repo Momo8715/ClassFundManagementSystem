@@ -389,13 +389,15 @@ function handlePayConfigSave() {
 
 // ==================== 接口：元数据 ====================
 function handlePayMeta() {
-    requireLogin();
+    // 免登录缴费：没有会话也允许读取花名册，但不返回任何人的金额
+    $guest = !isLoggedIn() || !empty($_SESSION['is_guest']);
+    if (!$guest) requireLogin();
     $cfg = getPayConfig();
-    $canViewAll = hasPermission('viewPayments');
-    $ownId = currentStudentId();
+    $canViewAll = !$guest && hasPermission('viewPayments');
+    $ownId = $guest ? 0 : currentStudentId();
     $roster = db()->query("SELECT id, name, exempt FROM class_roster ORDER BY sort_key, id")->fetchAll();
-    // 非班委账号只看本人，避免通过选择姓名查看他人缴费情况/代缴
-    if (!$canViewAll) {
+    // 非班委账号只看本人；访客（免登录缴费）可选全班，但不返回任何人的缴费金额
+    if (!$canViewAll && !$guest) {
         $roster = $ownId > 0 ? array_values(array_filter($roster, function ($s) use ($ownId) { return (int)$s['id'] === $ownId; })) : [];
     }
     $rounds = db()->query("SELECT id, date, description, amount, expected_amount, per_person FROM transactions
@@ -418,6 +420,7 @@ function handlePayMeta() {
         'fee_status' => $feeStatus,
         'own_student_id' => $ownId,
         'can_view_all' => $canViewAll,
+        'public_payer' => $guest,
         // 缴费链接统一用服务端主域名（payBaseUrl），与机器人「缴费 / 我的链接」、插件 paylink
         // 返回的链接逐字符一致；否则从哪个域名、哪个页面进后台，就会复制出哪个域名的链接。
         'pay_base' => payBaseUrl(),
@@ -464,7 +467,12 @@ function handlePayPublicMeta() {
 
 // ==================== 接口：创建订单 ====================
 function handlePayCreate(bool $public = false) {
+    // 无会话的免登录缴费页与访客会话都按公开下单处理
+    $guest = !isLoggedIn() || !empty($_SESSION['is_guest']);
+    $public = $public || $guest;
     if ($public) {
+        // 有访客会话时校验 CSRF；完全没有会话的公开页无法带 CSRF
+        if (!empty($_SESSION['is_guest'])) requireCsrfToken();
         requireRateLimit('pay_public_create', 10, 60);
     } else {
         requireLogin();

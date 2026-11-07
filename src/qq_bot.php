@@ -572,11 +572,11 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
         $bind = qqBindingStudent($key);
         if (!$bind) { qqReply($c, $scope, $target, $msgId, $noBind); return; }
         $sid = (int)$bind['student_id'];
-        $link = payBaseUrl() . '/pay.php?pay=' . $sid;
+        $link = payBaseUrl() . '/?pay=' . $sid;
         qqReply($c, $scope, $target, $msgId,
             "【" . $bind['name'] . " 专属缴费链接】\n" . $link
             . "\n\n点开后会自动选中你本人，直接在线缴纳。"
-            . (payBackupBaseUrl() !== payBaseUrl() ? "\n备用入口：" . payBackupBaseUrl() . '/pay.php?pay=' . $sid : ''));
+            . (payBackupBaseUrl() !== payBaseUrl() ? "\n备用入口：" . payBackupBaseUrl() . '/?pay=' . $sid : ''));
         return;
     }
 
@@ -585,9 +585,9 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
         $bind = qqBindingStudent($key);
         if (!$bind) { qqReply($c, $scope, $target, $msgId, $noBind); return; }
         qqReply($c, $scope, $target, $msgId,
-            "【" . $bind['name'] . " 专属缴费链接】\n" . payBaseUrl() . '/pay.php?pay=' . (int)$bind['student_id']
+            "【" . $bind['name'] . " 专属缴费链接】\n" . payBaseUrl() . '/?pay=' . (int)$bind['student_id']
             . "\n\n点开后选择本人姓名即可在线缴纳。"
-            . (payBackupBaseUrl() !== payBaseUrl() ? "\n备用入口：" . payBackupBaseUrl() . '/pay.php?pay=' . (int)$bind['student_id'] : ''));
+            . (payBackupBaseUrl() !== payBaseUrl() ? "\n备用入口：" . payBackupBaseUrl() . '/?pay=' . (int)$bind['student_id'] : ''));
         return;
     }
 
@@ -600,7 +600,7 @@ function qqHandleCommand(array $c, string $scope, string $target, string $openid
             return;
         }
         $s = payStudentStatus((int)$bind['student_id']);
-        $link = payBaseUrl() . '/pay.php?pay=' . (int)$bind['student_id'];
+        $link = payBaseUrl() . '/?pay=' . (int)$bind['student_id'];
         qqReply($c, $scope, $target, $msgId,
             "【" . $bind['name'] . " 班费】\n累计应缴 ¥" . number_format($s['due'], 2, '.', '')
             . "\n已缴 ¥" . number_format($s['paid'], 2, '.', '')
