@@ -37,6 +37,7 @@ async function uploadImage() {
 }
 function b32(s) { const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits=''; for (const ch of s.replace(/=+$/,'').toUpperCase()) { const i=a.indexOf(ch); if(i<0)continue; bits+=i.toString(2).padStart(5,'0'); } const out=[]; for(let i=0;i+8<=bits.length;i+=8) out.push(parseInt(bits.slice(i,i+8),2)); return Buffer.from(out); }
 const BOT_TOKEN = 'e56acaf2ce589c77d5ef96bb65b0783b';
+const EXPECTED_VERSION = JSON.parse(fs.readFileSync(require('path').join(root, 'version.json'), 'utf8')).version;
 const origin = new URL(API_BASE).origin;
 const botBase = origin + '/?bot_api=1';
 let mockHits = [];
@@ -86,7 +87,7 @@ function totp(secret) { const key=b32(secret); const step=Math.floor(Date.now()/
   await new Promise(function (resolve) { mockServer.listen(0, '127.0.0.1', resolve); });
   const mockPort = mockServer.address().port;
   r = await botReq('ping');
-  ok(r.status === 200 && r.json.ok && r.json.data.version === '1.18.2', 'bot ping', r);
+  ok(r.status === 200 && r.json.ok && r.json.data.version === EXPECTED_VERSION, 'bot ping', r);
   r = await botReq('ping', { token: 'wrong-token' });
   ok(r.status === 401, 'bot token 错误被拒绝', r.status);
   r = await botReq('bind', { channel: 'wechat', user: 'remote-test-1', name: '张三' });
