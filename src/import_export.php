@@ -270,7 +270,8 @@ function handleUploadImage() {
 /** api.php?action=tx_image&id=X&thumb=1|0 输出数据库中的凭证图片（登录用户可查看，访客禁止遍历） */
 function handleTxImage() {
     requirePermission('viewTransactions');
-    if ((int)(currentUser()['id'] ?? 0) === 0) jsonOutput(['error' => '访客无权查看凭证'], 403);
+    // 访客模式（同学直接进入）也允许查看班级凭证；不再单独拦截 id=0。
+    // 图片仍经登录态/权限校验，非访客或访客会话都需先通过 requirePermission。
 
     // 旧版直连路径（uploads/...）改为统一经 API 输出，便于 nginx 禁止 /uploads/ 直连
     $legacyPath = trim((string)($_GET['path'] ?? ''));
