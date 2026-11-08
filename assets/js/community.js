@@ -38,7 +38,7 @@
     }catch(e){ann.innerHTML='<div class="empty">'+esc(e.message)+'</div>';vote.innerHTML='';}
   }
   window._communityLoad=load;
-  document.addEventListener('DOMContentLoaded',function(){var n=document.getElementById('navCommunity');if(n&&window._initialUser&&window._initialUser.is_guest)n.style.display='none';});
+  document.addEventListener('DOMContentLoaded',function(){var n=document.getElementById('navCommunity');if(n&&window._initialUser&&window._initialUser.is_guest)n.style.display='none';var g=document.getElementById('navGroupCommunity');if(g&&window._initialUser&&window._initialUser.is_guest)g.style.display='none';});
   window._annCreate=async function(){
     var title=(document.getElementById('annTitle')||{}).value||'', content=(document.getElementById('annContent')||{}).value||'';
     if(!title||!content){alert('请填写公告标题和内容');return;}

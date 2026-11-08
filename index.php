@@ -138,6 +138,8 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     .login-divider::before,.login-divider::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.12);}
     .hint{font-size:12px;color:#94a3b8;text-align:center;margin-top:12px;font-family:-apple-system,sans-serif;}
     .wave{display:inline-block;}
+    .nav-group-title{font-size:10px;letter-spacing:.08em;color:var(--text-secondary);opacity:.75;padding:12px 16px 4px;text-transform:uppercase;}
+    .sidebar-nav .nav-group-title:first-child{padding-top:4px;}
     </style>
     <link rel="stylesheet" href="assets/css/style.css?v=18" onerror="window.__retryResource(this,'assets/css/style.css?v=18')">
     <!-- 移动端优化 + 收支详情 / 凭证查看 -->
@@ -225,6 +227,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                 <button class="theme-toggle" id="themeBtn" onclick="toggleTheme()">🌙</button>
             </div>
             <nav class="sidebar-nav">
+                <div class="nav-group-title">财务与缴费</div>
                 <button class="active" data-page="dashboard" onclick="switchPage('dashboard')">
                     <span class="icon">📊</span> 仪表盘
                 </button>
@@ -234,26 +237,34 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                 <button data-page="report" onclick="switchPage('report')" id="navReport">
                     <span class="icon">📈</span> 学期报表
                 </button>
-                <button data-page="import" onclick="switchPage('import')" id="navImport">
-                    <span class="icon">📥</span> 导入数据
-                </button>
-                <button data-page="students" onclick="switchPage('students')" id="navStudents">
-                    <span class="icon">👥</span> 用户管理
-                </button>
-                <button data-page="roster" onclick="switchPage('roster')" id="navRoster">
-                    <span class="icon">📋</span> 花名册
-                </button>
                 <button data-page="pay" onclick="switchPage('pay')" id="navPay">
                     <span class="icon">💳</span> 在线缴费
                 </button>
                 <button data-page="myfee" onclick="switchPage('myfee');window._myFeeLoad&&window._myFeeLoad()" id="navMyFee">
                     <span class="icon">📒</span> 我的班费
                 </button>
+                <button data-page="payments" onclick="switchPage('payments');window._payLoadOrders&&window._payLoadOrders()" id="navPayments">
+                    <span class="icon">📋</span> 缴费管理
+                </button>
+
+                <?php if (hasPermission('manageStudents') || hasPermission('manageAllAccounts')): ?>
+                <div class="nav-group-title" id="navGroupStudents">学生管理</div>
+                <button data-page="students" onclick="switchPage('students')" id="navStudents">
+                    <span class="icon">👥</span> 用户管理
+                </button>
+                <button data-page="roster" onclick="switchPage('roster')" id="navRoster">
+                    <span class="icon">📋</span> 花名册
+                </button>
+                <?php endif; ?>
+
+                <div class="nav-group-title" id="navGroupCommunity">班级事务</div>
                 <button data-page="community" onclick="switchPage('community');window._communityLoad&&window._communityLoad()" id="navCommunity">
                     <span class="icon">📢</span> 公告投票
                 </button>
-                <button data-page="payments" onclick="switchPage('payments');window._payLoadOrders&&window._payLoadOrders()" id="navPayments">
-                    <span class="icon">📋</span> 缴费情况
+
+                <div class="nav-group-title">数据与系统</div>
+                <button data-page="import" onclick="switchPage('import')" id="navImport">
+                    <span class="icon">📥</span> 导入数据
                 </button>
                 <button data-page="logs" onclick="switchPage('logs')" id="navLogs">
                     <span class="icon">📜</span> 操作日志
