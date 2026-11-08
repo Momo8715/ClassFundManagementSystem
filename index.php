@@ -138,6 +138,10 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     .login-divider::before,.login-divider::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.12);}
     .hint{font-size:12px;color:#94a3b8;text-align:center;margin-top:12px;font-family:-apple-system,sans-serif;}
     .wave{display:inline-block;}
+    #botNotifyPanel{max-height:340px;overflow-y:auto;padding-right:4px;overscroll-behavior:contain}
+    #remCfgWebhookLog{max-height:320px;overflow-y:auto;overscroll-behavior:contain}
+    #remCfgQqTargets{max-height:300px;overflow-y:auto;padding-right:4px}
+    #remCfgCustomReplies{max-height:280px;overflow-y:auto;padding-right:4px}
     .nav-group-title{font-size:10px;letter-spacing:.08em;color:var(--text-secondary);opacity:.75;padding:12px 16px 4px;text-transform:uppercase;}
     .sidebar-nav .nav-group-title:first-child{padding-top:4px;}
     </style>
@@ -899,8 +903,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                                 · <b>自定义</b>：填写任意可接收 <code>POST JSON</code> 的 https 地址
                             </div>
                         </div>
-                    </div>
-                                        <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);max-width:900px;margin-top:16px">
+                    <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);max-width:900px;margin-top:16px">
                         <h4 style="font-size:13px;margin-bottom:8px;color:var(--primary)">🤖 机器人插件接口</h4>
                         <p style="font-size:12px;color:var(--text-secondary);margin-bottom:10px">供微信/QQ 机器人查询、远端绑定、缴费链接、通知轮询；所有请求需带 token（或 <code>X-Bot-Token</code> 请求头）。</p>
                         <div style="display:grid;grid-template-columns:110px 1fr;gap:8px 10px;align-items:center;max-width:780px">
@@ -920,7 +923,8 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                             <div id="botNotifyPanel" style="font-size:12px;color:var(--text-secondary)">加载中…</div>
                         </div>
                     </div>
-<div class="tab-pane" data-pane="upgrade" style="display:none">
+                    </div>
+                                        <div class="tab-pane" data-pane="upgrade" style="display:none">
                     <h4 style="margin:16px 0 8px;color:var(--primary)">🔄 远程升级</h4>
                     <div style="background:var(--bg-card);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow);margin-bottom:8px">
                         <button class="btn btn-primary btn-sm" onclick="checkUpdate()">🔍 检查更新</button>
