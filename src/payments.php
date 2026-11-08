@@ -227,6 +227,22 @@ function handleOfflinePayment() {
     $attr = payAttributeToRounds($sid, $roundId, $amount);
     $u = currentUser();
     addLog((int)$u['id'], (string)$u['username'], 'offline_payment', 'payment', $sid, ['amount' => $amount, 'order_no' => $orderNo, 'method' => $method]);
+    // 线下缴费也要推送到微信（之前漏了，导致群里收不到）
+    if (function_exists('botNotifyPaymentSuccess')) {
+        try {
+            botNotifyPaymentSuccess([
+                'order_no' => $orderNo,
+                'student_id' => $sid,
+                'student_name' => $row['name'],
+                'amount' => $amount,
+                'channel' => 'offline:' . ($method !== '' ? $method : 'cash'),
+                'trade_no' => $note,
+                'paid_at' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (\Throwable $e) {
+            error_log('[班费系统] 线下缴费通知失败: ' . $e->getMessage());
+        }
+    }
     jsonOutput(['ok' => true, 'order_no' => $orderNo, 'amount' => $amount, 'name' => $row['name'], 'merged' => $attr['merged'], 'rest' => $attr['rest']]);
 }
 
@@ -253,5 +269,17 @@ function handleRefund() {
         ->execute([':o' => $orderNo, ':sid' => $sid, ':sn' => $row['name'], ':a' => -abs($amount), ':t' => $reason]);
     $uid = (int)(currentUser()['id'] ?? 0);
     addLog($uid, (string)(currentUser()['username'] ?? ''), 'refund', 'payment', $sid, ['amount' => $amount, 'order_no' => $orderNo, 'reason' => $reason]);
+    if (function_exists('botNotifyCreate')) {
+        try {
+            botNotifyCreate('refund', '班费退款',
+                "【班费退款】\n" . $row['name'] . ' 退款 ¥' . number_format($amount, 2, '.', '')
+                . ($reason !== '' ? "\n原因：" . $reason : '')
+                . "\n单号：" . $orderNo . "\n时间：" . date('Y-m-d H:i:s'),
+                ['order_no' => $orderNo, 'student_id' => $sid, 'amount' => round($amount, 2), 'reason' => $reason],
+                'refund:' . $orderNo, $sid, $row['name']);
+        } catch (\Throwable $e) {
+            error_log('[班费系统] 退款通知失败: ' . $e->getMessage());
+        }
+    }
     jsonOutput(['ok' => true, 'order_no' => $orderNo, 'amount' => $amount, 'name' => $row['name']]);
 }

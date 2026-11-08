@@ -122,6 +122,21 @@ function botDispatchPending(int $limit = 10): array {
 }
 
 /** 支付成功通知（订单已变为 paid 后调用；按订单号去重） */
+function botChannelLabel(string $channel): string {
+    $raw = trim($channel);
+    if ($raw === '') return '';
+    $map = ['wxpay' => '微信', 'wechat' => '微信', 'wx' => '微信', 'alipay' => '支付宝',
+        'ali' => '支付宝', 'cash' => '现金', 'offline' => '线下', 'refund' => '退款'];
+    $c = strtolower($raw);
+    if (isset($map[$c])) return $map[$c];
+    if (strpos($c, 'offline:') === 0) {
+        $m = strtolower(trim(substr($raw, 8)));
+        if ($m === '' || $m === 'cash') return '现金';
+        return isset($map[$m]) ? $map[$m] : trim(substr($raw, 8));
+    }
+    return $raw;
+}
+
 function botNotifyPaymentSuccess(array $order): int {
     $orderNo = (string)($order['order_no'] ?? '');
     if ($orderNo === '') return 0;
@@ -133,7 +148,7 @@ function botNotifyPaymentSuccess(array $order): int {
     $paidAt = (string)($order['paid_at'] ?? date('Y-m-d H:i:s'));
     $title = '班费到账';
     $content = "【班费到账】\n" . $name . ' 已缴纳 ' . botNotifyMoney($amount)
-        . "\n订单：{$orderNo}" . ($channel !== '' ? "\n方式：{$channel}" : '')
+        . "\n订单：{$orderNo}" . ($channel !== '' ? "\n方式：" . botChannelLabel($channel) : '')
         . "\n时间：{$paidAt}"
         . (function_exists('payBaseUrl') && $sid > 0 ? "\n查看：\n" . payBaseUrl() . '/?pay=' . $sid . '#page-pay' : '');
     return botNotifyCreate('payment_success', $title, $content, [
