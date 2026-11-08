@@ -10,6 +10,12 @@ require_once __DIR__ . '/pay_core.php';
 require_once __DIR__ . '/pay.php';
 require_once __DIR__ . '/bot_notify.php';
 
+function botApiVersion(): string {
+    $f = __DIR__ . '/../version.json';
+    $j = is_file($f) ? json_decode((string)@file_get_contents($f), true) : null;
+    return is_array($j) && !empty($j['version']) ? (string)$j['version'] : '1.18.2';
+}
+
 function botApiOut(array $data): void {
     echo json_encode(['ok' => true, 'data' => $data], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     exit;
@@ -200,7 +206,7 @@ function handleBotApi(): void {
     try {
         switch ($action) {
             case 'ping':
-                botApiOut(['pong' => true, 'time' => date('c'), 'version' => '1.18.0', 'api' => 'bot_v1']);
+                botApiOut(['pong' => true, 'time' => date('c'), 'version' => botApiVersion(), 'api' => 'bot_v1']);
 
             case 'roster':
                 $names = [];
@@ -455,7 +461,7 @@ function handleBotApi(): void {
 
             case 'help':
             case 'actions':
-                botApiOut(['actions' => ['ping', 'roster', 'status', 'unpaid', 'summary', 'bind', 'whoami', 'paylink', 'pay', 'my_fee', 'orders', 'reminder_target', 'offline_pay', 'refund', 'ann_list', 'ann_create', 'vote_list', 'vote_create', 'poll', 'ack', 'notify', 'set_bind_code'], 'version' => '1.18.0']);
+                botApiOut(['actions' => ['ping', 'roster', 'status', 'unpaid', 'summary', 'bind', 'whoami', 'paylink', 'pay', 'my_fee', 'orders', 'reminder_target', 'offline_pay', 'refund', 'ann_list', 'ann_create', 'vote_list', 'vote_create', 'poll', 'ack', 'notify', 'set_bind_code'], 'version' => botApiVersion()]);
 
             default:
                 botApiErr('未知 action', 404);
