@@ -164,7 +164,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     </script>
     <!-- 预加载关键资源：提前建立连接/加载JS，减少等待 -->
     <link rel="preload" href="assets/css/style.css?v=18" as="style">
-    <link rel="preload" href="assets/js/app.js?v=44" as="script">
+    <link rel="preload" href="assets/js/app.js?v=45" as="script">
     <link rel="preconnect" href="/" crossorigin>
     <script data-cfasync="false">
     // 防止 app.js 未就绪时点击登录报错：按钮先禁用，JS 加载后启用
@@ -251,7 +251,6 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                     <span class="icon">📋</span> 缴费管理
                 </button>
 
-                <?php if (hasPermission('manageStudents') || hasPermission('manageAllAccounts')): ?>
                 <div class="nav-group-title" id="navGroupStudents">学生管理</div>
                 <button data-page="students" onclick="switchPage('students')" id="navStudents">
                     <span class="icon">👥</span> 用户管理
@@ -259,8 +258,6 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                 <button data-page="roster" onclick="switchPage('roster')" id="navRoster">
                     <span class="icon">📋</span> 花名册
                 </button>
-                <?php endif; ?>
-
                 <div class="nav-group-title" id="navGroupCommunity">班级事务</div>
                 <button data-page="community" onclick="switchPage('community');window._communityLoad&&window._communityLoad()" id="navCommunity">
                     <span class="icon">📢</span> 公告投票
@@ -1099,7 +1096,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
 
     <!-- 应用脚本 -->
     <script src="assets/js/common.js?v=1" defer data-cfasync="false"></script>
-    <script src="assets/js/app.js?v=44" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=44')"></script>
+    <script src="assets/js/app.js?v=45" defer data-cfasync="false" onerror="window.__retryResource(this,'assets/js/app.js?v=45')"></script>
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
     <script src="assets/js/security.js?v=5" defer data-cfasync="false"></script>
     <!-- 在线支付面板（v1.8.1） -->

@@ -228,11 +228,14 @@
           t.style.display = n ? "" : "none";
         }
       }),
-        (document.getElementById("navStudents").style.display =
-          B("manageStudents") || B("manageAllAccounts") ? "" : "none"),
-        (document.getElementById("btnAddTx").style.display = B("addTransaction")
-          ? ""
-          : "none");
+        (function () {
+          var el = document.getElementById("navStudents");
+          if (el) el.style.display = B("manageStudents") || B("manageAllAccounts") ? "" : "none";
+        })(),
+        (function () {
+          var el = document.getElementById("btnAddTx");
+          if (el) el.style.display = B("addTransaction") ? "" : "none";
+        })();
       var e = document.getElementById("btnBatchDel");
       e && (e.style.display = B("deleteTransaction") ? "" : "none");
       var _scf = document.getElementById("semesterCreateForm");
