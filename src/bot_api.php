@@ -352,6 +352,10 @@ function handleBotApi(): void {
                     ->execute([':o' => $orderNo, ':sid' => (int)$hit['id'], ':sn' => $hit['name'], ':rid' => $roundId,
                         ':a' => $amount, ':ch' => 'offline:' . ($method ?: 'cash'), ':t' => $note]);
                 $attr = payAttributeToRounds((int)$hit['id'], $roundId, $amount);
+                $txId = !empty($attr['merged']) ? (int)array_key_first($attr['merged']) : 0;
+                if ($txId > 0) {
+                    db()->prepare("UPDATE fee_payments SET tx_id=:t WHERE order_no=:o")->execute([':t' => $txId, ':o' => $orderNo]);
+                }
                 botApiOut(['ok' => true, 'order_no' => $orderNo, 'name' => $hit['name'], 'amount' => $amount, 'merged' => $attr['merged'], 'rest' => $attr['rest']]);
 
             case 'refund':

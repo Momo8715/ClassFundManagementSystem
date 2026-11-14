@@ -225,6 +225,11 @@ function handleOfflinePayment() {
         ->execute([':o' => $orderNo, ':sid' => $sid, ':sn' => $row['name'], ':rid' => $roundId,
             ':a' => $amount, ':ch' => 'offline:' . ($method ?: 'cash'), ':t' => $note]);
     $attr = payAttributeToRounds($sid, $roundId, $amount);
+    // 并入轮次后把 fee_payments.tx_id 指向该轮，避免「轮次名单 + 未并入金额」重复计数
+    $txId = !empty($attr['merged']) ? (int)array_key_first($attr['merged']) : 0;
+    if ($txId > 0) {
+        db()->prepare("UPDATE fee_payments SET tx_id=:t WHERE order_no=:o")->execute([':t' => $txId, ':o' => $orderNo]);
+    }
     $u = currentUser();
     addLog((int)$u['id'], (string)$u['username'], 'offline_payment', 'payment', $sid, ['amount' => $amount, 'order_no' => $orderNo, 'method' => $method]);
     // 线下缴费也要推送到微信（之前漏了，导致群里收不到）
