@@ -372,6 +372,18 @@ function handlePayReminderCfgSave() {
     jsonOutput(['ok' => true]);
 }
 
+/** 把 QQ 推送失败转成可操作的中文提示 */
+function reminderPushErrorText(array $res): string {
+    $raw = (string)($res['resp'] ?? $res['error'] ?? '');
+    if (strpos($raw, '40034105') !== false || strpos($raw, '无权限') !== false) {
+        return 'QQ 官方机器人没有「主动消息」权限，无法主动群发提醒。请在 QQ 开放平台申请主动消息权限，或改用企业微信/飞书/钉钉 Webhook；也可以让管理员在群里 @机器人 发送「催缴」，由机器人被动回复。';
+    }
+    if (strpos($raw, '11255') !== false || strpos($raw, '资源不存在') !== false) {
+        return 'QQ 推送目标无效：当前配置的群不是该机器人所在的群，或 group_openid 已失效。请在群内 @机器人 发一条消息，再从「QQ 回调协议监测」复制新的 group_openid。';
+    }
+    return '推送失败：HTTP ' . (int)($res['http'] ?? 0) . ' ' . mb_substr($raw, 0, 300);
+}
+
 function handlePayReminderSend() {
     requirePermission('viewPayments');
     requireCsrfToken();
@@ -384,7 +396,7 @@ function handlePayReminderSend() {
     $res = ($c['type'] === 'qq')
         ? reminderQqSend($c, $sum['text'])
         : reminderWebhookPost($c['webhook'], reminderWebhookPayload($c['type'], $sum['text']));
-    if (!$res['ok']) jsonOutput(['error' => '推送失败：HTTP ' . $res['http'] . ' ' . $res['resp']], 502);
+    if (!$res['ok']) jsonOutput(['error' => reminderPushErrorText($res)], 400);
     $u = currentUser();
     addLog($u['id'], $u['username'], 'pay_reminder_send', 'payment', null, ['count' => $sum['count'], 'total' => $sum['total'], 'type' => $c['type']]);
     jsonOutput(['ok' => true, 'count' => $sum['count'], 'total' => $sum['total']]);
@@ -409,7 +421,7 @@ function handlePayReminderPushText() {
         if ($c['webhook'] === '') jsonOutput(['error' => '请先配置群机器人 Webhook'], 400);
         $res = reminderWebhookPost($c['webhook'], reminderWebhookPayload($c['type'], $text));
     }
-    if (!$res['ok']) jsonOutput(['error' => '发送失败：HTTP ' . $res['http'] . ' ' . $res['resp']], 502);
+    if (!$res['ok']) jsonOutput(['error' => reminderPushErrorText($res)], 400);
     $u = currentUser();
     addLog($u['id'], $u['username'], 'pay_reminder_push_text', 'payment', null, ['type' => $c['type'], 'len' => mb_strlen($text)]);
     jsonOutput(['ok' => true]);
