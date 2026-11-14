@@ -532,8 +532,9 @@
   window._payReminderCfgToggle = function () {
     var type = (document.getElementById('remCfgType') || {}).value || 'wecom';
     var isQq = type === 'qq';
+    var isWechat = type === 'wechat';
     ['remCfgWebhookLabel', 'remCfgWebhook'].forEach(function (id) {
-      var e = document.getElementById(id); if (e) e.style.display = isQq ? 'none' : '';
+      var e = document.getElementById(id); if (e) e.style.display = (isQq || isWechat) ? 'none' : '';
     });
     // QQ 专属设置整块显示 / 隐藏
     var qbox = document.getElementById('remCfgQqBox');
@@ -546,6 +547,7 @@
       feishu: '获取：飞书群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制 Webhook 地址。',
       dingtalk: '获取：钉钉群 → 群设置 → 智能群助手 → 添加机器人 → 自定义 → 复制 Webhook 地址。',
       qq: '获取：QQ 开放平台创建机器人后，在「开发设置」获取 AppID / AppSecret；「推送目标」可添加多个方向：QQ用户（单聊 openid）/ QQ群（group_openid）/ 频道（channel_id）。',
+      wechat: '微信群发：由 WeChatBot 插件连接你的微信，网页把内容写入通知队列，插件轮询后发到指定群。请在 WeChatBot 插件面板填写群目标（本地微信模式可填 local，WCF 模式填群 room ID）。',
       custom: '获取：由你的机器人服务 / 中转服务提供可接收 POST JSON 的 https 地址。'
     };
     set('remCfgCurrentHelp', '当前类型获取方式：' + (help[type] || ''));

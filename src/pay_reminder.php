@@ -9,7 +9,7 @@ require_once __DIR__ . '/pay_core.php';
 /** 催缴推送配置（存 system_meta，Webhook 地址不落代码/仓库） */
 function reminderConfig(): array {
     $type = getMeta('reminder_type', 'wecom');
-    if (!in_array($type, ['wecom', 'feishu', 'dingtalk', 'custom', 'qq'], true)) $type = 'wecom';
+    if (!in_array($type, ['wecom', 'feishu', 'dingtalk', 'custom', 'qq', 'wechat'], true)) $type = 'wecom';
     $scope = getMeta('reminder_qq_scope', 'group');
     if (!in_array($scope, ['group', 'c2c', 'channel'], true)) $scope = 'group';
     // 多目标：reminder_qq_targets = JSON [{scope,id},...]；兼容旧的单目标字段
@@ -192,13 +192,23 @@ function reminderAutoSend(): array {
         if ($c['qq_appid'] === '' || $c['qq_secret'] === '' || empty($c['qq_targets'])) {
             return ['ok' => false, 'skipped' => 'qq_not_configured'];
         }
-    } elseif ($c['webhook'] === '') {
+    } elseif ($c['type'] !== 'wechat' && $c['webhook'] === '') {
         return ['ok' => false, 'skipped' => 'webhook_not_configured'];
     }
     $sum = reminderSummary();
     if ((int)$sum['count'] === 0) {
         setMeta('reminder_auto_last', $today);
         return ['ok' => true, 'count' => 0, 'message' => '全部已缴清，无需催缴'];
+    }
+    if ($c['type'] === 'wechat') {
+        if (!function_exists('botNotifyCreate')) return ['ok' => false, 'error' => '微信通知队列未加载'];
+        $id = botNotifyCreate('wechat_broadcast', '每日班费催缴', $sum['text'], ['source' => 'cron_reminder'], '', 0, '', 'plugin');
+        if ($id > 0) {
+            setMeta('reminder_auto_last', $today);
+            addLog(0, 'system', 'reminder_auto_send', 'payment', null, ['count' => $sum['count'], 'total' => $sum['total'], 'type' => 'wechat', 'queued_id' => $id]);
+            return ['ok' => true, 'count' => $sum['count'], 'total' => $sum['total'], 'queued' => true];
+        }
+        return ['ok' => false, 'error' => '写入微信通知队列失败'];
     }
     $res = ($c['type'] === 'qq')
         ? reminderQqSend($c, $sum['text'])
@@ -259,7 +269,7 @@ function handlePayReminderCfgSave() {
     requireCsrfToken();
     $input = jsonInput();
     $enabled = !empty($input['enabled']) && $input['enabled'] !== '0' && $input['enabled'] !== 'false';
-    $type = in_array($input['type'] ?? '', ['wecom', 'feishu', 'dingtalk', 'custom', 'qq'], true) ? $input['type'] : 'wecom';
+    $type = in_array($input['type'] ?? '', ['wecom', 'feishu', 'dingtalk', 'custom', 'qq', 'wechat'], true) ? $input['type'] : 'wecom';
     $old = reminderConfig();
 
     // Webhook（企业微信 / 飞书 / 钉钉 / 自定义）
@@ -340,7 +350,7 @@ function handlePayReminderCfgSave() {
         if ($type === 'qq') {
             if ($appid === '' || $secret === '') jsonOutput(['error' => '启用 QQ 机器人推送前需填 AppID / AppSecret'], 400);
             if (empty($targets)) jsonOutput(['error' => '启用 QQ 机器人推送前请至少添加一个推送目标'], 400);
-        } elseif ($webhook === '') {
+        } elseif ($type !== 'wechat' && $webhook === '') {
             jsonOutput(['error' => '启用前请先填写群机器人 Webhook 地址'], 400);
         }
     }
@@ -390,9 +400,17 @@ function handlePayReminderSend() {
     $c = reminderConfig();
     if ($c['type'] === 'qq') qqGatewayEnsureRunning();
     if (!$c['enabled']) jsonOutput(['error' => '未启用催缴推送（管理员可在 配置管理 → 群机器人 配置）'], 400);
-    if ($c['type'] !== 'qq' && $c['webhook'] === '') jsonOutput(['error' => '未配置催缴推送 Webhook'], 400);
     $sum = reminderSummary();
     if ($sum['count'] === 0) jsonOutput(['ok' => true, 'count' => 0, 'total' => 0, 'message' => '全部已缴清，无需催缴']);
+    if ($c['type'] === 'wechat') {
+        if (!function_exists('botNotifyCreate')) jsonOutput(['error' => '微信通知队列未加载'], 500);
+        $id = botNotifyCreate('wechat_broadcast', '微信群发催缴', $sum['text'], ['source' => 'pay_reminder'], '', 0, '', 'plugin');
+        if ($id <= 0) jsonOutput(['error' => '写入微信通知队列失败'], 500);
+        $u = currentUser();
+        addLog($u['id'], $u['username'], 'pay_reminder_send', 'payment', null, ['count' => $sum['count'], 'total' => $sum['total'], 'type' => 'wechat', 'queued_id' => $id]);
+        jsonOutput(['ok' => true, 'queued' => true, 'count' => $sum['count'], 'total' => $sum['total'], 'message' => '已加入微信群发队列，WeChatBot 插件将在几秒内发送']);
+    }
+    if ($c['type'] !== 'qq' && $c['webhook'] === '') jsonOutput(['error' => '未配置催缴推送 Webhook'], 400);
     $res = ($c['type'] === 'qq')
         ? reminderQqSend($c, $sum['text'])
         : reminderWebhookPost($c['webhook'], reminderWebhookPayload($c['type'], $sum['text']));
@@ -412,6 +430,14 @@ function handlePayReminderPushText() {
     if (mb_strlen($text) > 1000) jsonOutput(['error' => '消息过长（最多 1000 字）'], 400);
     $c = reminderConfig();
     if ($c['type'] === 'qq') qqGatewayEnsureRunning();
+    if ($c['type'] === 'wechat') {
+        if (!function_exists('botNotifyCreate')) jsonOutput(['error' => '微信通知队列未加载'], 500);
+        $id = botNotifyCreate('wechat_broadcast', '微信群发消息', $text, ['source' => 'pay_reminder'], '', 0, '', 'plugin');
+        if ($id <= 0) jsonOutput(['error' => '写入微信通知队列失败'], 500);
+        $u = currentUser();
+        addLog($u['id'], $u['username'], 'pay_reminder_push_text', 'payment', null, ['type' => 'wechat', 'len' => mb_strlen($text), 'queued_id' => $id]);
+        jsonOutput(['ok' => true, 'queued' => true, 'message' => '已加入微信群发队列']);
+    }
     if ($c['type'] === 'qq') {
         if ($c['qq_appid'] === '' || $c['qq_secret'] === '' || empty($c['qq_targets'])) {
             jsonOutput(['error' => '请先配置 QQ 机器人（AppID / AppSecret / 目标ID）'], 400);

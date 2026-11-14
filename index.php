@@ -796,6 +796,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
                                     <option value="feishu">飞书机器人</option>
                                     <option value="dingtalk">钉钉机器人</option>
                                     <option value="qq">QQ 官方机器人</option>
+                                    <option value="wechat">微信群发（通过 WeChatBot 插件）</option>
                                     <option value="custom">自定义（POST JSON）</option>
                                 </select>
                                 <label id="remCfgWebhookLabel" style="font-size:13px">Webhook</label>
@@ -1100,7 +1101,7 @@ if (substr_count($siteVersion, '.') < 2) $siteVersion .= '.0';
     <!-- 安全分析面板增强（v1.8）：依赖 app.js，须在其后加载 -->
     <script src="assets/js/security.js?v=5" defer data-cfasync="false"></script>
     <!-- 在线支付面板（v1.8.1） -->
-    <script src="assets/js/pay.js?v=28" defer data-cfasync="false"></script>
+    <script src="assets/js/pay.js?v=29" defer data-cfasync="false"></script>
     <script src="assets/js/myfee.js?v=1" defer data-cfasync="false"></script>
     <script src="assets/js/community.js?v=1" defer data-cfasync="false"></script>
     <!-- 通用二级分类页签（多分栏页面） -->
